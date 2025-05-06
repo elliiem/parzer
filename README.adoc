@@ -1,0 +1,7 @@
+# parzer
+
+Zig's standard library supplies a json serializer/deserializer but other formats such as toml, xml
+and so on don't get such a treatment. Furthermore the json module is not easily configurable to
+accomodate different ways to represent structured data such as serde.rs's internally tagged enum's.
+Parzer aims to make it much easier to work with these slightly different formats, by allowing programatic
+generation of serializers/deserializers. It also aims to be able to work with different formats than json.
