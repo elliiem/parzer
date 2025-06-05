@@ -129,7 +129,65 @@ fn consumeNull(self: *Tokenizer) ParseError!void {
     }
 }
 
-//  TODO: Bool
+fn consumeTrue(self: *Tokenizer) ParseError!void {
+    defer self.consumeChars(keywords.TRUE.len);
+
+    if (!self.peekEql(keywords.TRUE)) {
+        return ParseError.InvalidToken;
+    }
+}
+
+fn consumeFalse(self: *Tokenizer) ParseError!void {
+    defer self.consumeChars(keywords.FALSE.len);
+
+    if (!self.peekEql(keywords.FALSE)) {
+        return ParseError.InvalidToken;
+    }
+}
+
+pub fn nextExpectBool(self: *Tokenizer) ParseError!bool {
+    try self.consumeWhitespace();
+
+    self.assertFilledSource();
+
+    switch (self.peekChar()) {
+        keywords.TRUE[0] => {
+            try self.consumeTrue();
+            return true;
+        },
+        keywords.FALSE[0] => {
+            try self.consumeFalse();
+            return false;
+        },
+        else => {
+            return ParseError.InvalidToken;
+        },
+    }
+}
+
+pub fn nextExpectBoolMaybeNull(self: *Tokenizer) ParseError!?bool {
+    try self.consumeWhitespace();
+
+    self.assertFilledSource();
+
+    switch (self.peekChar()) {
+        keywords.TRUE[0] => {
+            try self.consumeTrue();
+            return true;
+        },
+        keywords.FALSE[0] => {
+            try self.consumeFalse();
+            return false;
+        },
+        keywords.NULL[0] => {
+            try self.consumeNull();
+            return null;
+        },
+        else => {
+            return ParseError.InvalidToken;
+        },
+    }
+}
 
 fn consumeNumberTrail(self: *Tokenizer) ParseError!void {
     self.assertFilledSource();
