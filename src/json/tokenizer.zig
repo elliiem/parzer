@@ -6,23 +6,14 @@ const Tokenizer = @This();
 
 source: []const u8,
 i: usize,
+expects_field: bool,
+epects_list_entry: bool,
 
 pub const ParseError = error{
     InvalidNumber,
     InvalidToken,
     InvalidString,
-};
-
-const Token = union(enum) {
-    Number: []const u8,
-    String: []const u8,
-    Boolean: bool,
-    Null: void,
-    ArrayBegin: void,
-    ArrayEnd: void,
-    ObjectBegin: void,
-    ObjectEnd: void,
-    Field: []const u8,
+    InvalidField,
 };
 
 // --------------------------------------------------
@@ -452,12 +443,8 @@ fn consumeString(self: *Tokenizer) ParseError!void {
     return self.consumeStringTrail();
 }
 
-pub fn nextExpectString(self: *Tokenizer) ParseError![]const u8 {
-    try self.consumeWhitespace();
-
-    if (self.isSourceEmpty()) {
-        return ParseError.InvalidString;
-    }
+pub fn takeString(self: *Tokenizer) ParseError![]const u8 {
+    self.assertFilledSource();
 
     const start = self.i + 1;
 
@@ -468,13 +455,29 @@ pub fn nextExpectString(self: *Tokenizer) ParseError![]const u8 {
     return self.source[start..end];
 }
 
-pub fn nextExpectStringMaybeNull(self: *Tokenizer) ParseError!?[]const u8 {
+pub fn takeStringTrail(self: *Tokenizer) ParseError![]const u8 {
+    self.assertFilledSource();
+
+    const start = self.i;
+
+    try self.consumeStringTrail();
+
+    const end = self.i - 1;
+
+    return self.source[start..end];
+}
+
+pub fn nextExpectString(self: *Tokenizer) ParseError![]const u8 {
     try self.consumeWhitespace();
 
     if (self.isSourceEmpty()) {
         return ParseError.InvalidString;
     }
 
+    return self.takeString();
+}
+
+pub fn takeStringMaybeNull(self: *Tokenizer) ParseError!?[]const u8 {
     const start = self.i + 1;
 
     switch (self.peekChar()) {
@@ -497,17 +500,97 @@ pub fn nextExpectStringMaybeNull(self: *Tokenizer) ParseError!?[]const u8 {
     return self.source[start..end];
 }
 
+pub fn nextExpectStringMaybeNull(self: *Tokenizer) ParseError!?[]const u8 {
+    try self.consumeWhitespace();
+
+    if (self.isSourceEmpty()) {
+        return ParseError.InvalidString;
+    }
+
+    return self.takeStringMaybeNull();
+}
+
 // Primitives
 // --------------------------------------------------
 
+pub const Token = union(enum) {
+    Number: []const u8,
+    String: []const u8,
+    Bool: bool,
+    Field: []const u8,
+    Null: void,
+    ObjectBegin: void,
+    ObjectEnd: void,
+    ArrayBegin: void,
+    ArrayEnd: void,
+    Comma: void,
+};
+
+pub fn takeField(self: *Tokenizer) ParseError![]const u8 {
+    self.assertFilledSource();
+
+    const value = self.takeString() catch {
+        return ParseError.InvalidField;
+    };
+
+    try self.consumeWhitespace();
+
+    self.assertFilledSource();
+
+    if (self.peekChar() != keywords.COLON) {
+        return ParseError.InvalidField;
+    }
+
+    return value;
+}
+
 pub fn next(self: *Tokenizer) ParseError!?Token {
+    try self.consumeWhitespace();
+
     if (self.isSourceEmpty()) {
         return null;
     }
 
-    const ch = self.peekChar();
+    switch (self.peekChar()) {
+        keywords.OBJ_BEGIN => {
+            self.consumeChar();
+            return .ObjectBegin;
+        },
+        keywords.OBJ_END => {
+            self.consumeChar();
+            return .ObjectEnd;
+        },
+        keywords.LIST_BEGIN => {
+            self.consumeChar();
+            return .ListBegin;
+        },
+        keywords.LIST_END => {
+            self.consumeChar();
+            return .ListEnd;
+        },
+        keywords.COMMA => {
+            self.consumeChar();
+            return .Comma;
+        },
+        keywords.NULL[0] => {
+            self.consumeChar();
+            try self.consumeNullTrail();
+            return .Null;
+        },
+        keywords.DQUOTE => {
+            self.consumeChar();
+            const str = try self.takeStringTrail();
 
-    switch (ch) {
-        '1'...'9' => {},
+            if (!self.isSourceEmpty() and self.peekChar() == keywords.COLON) {
+                self.consumeChar();
+
+                return Token{ .Field = str };
+            } else {
+                return Token{ .String = str };
+            }
+        },
+        '0'...'9', '-' => {
+            return Token{ .Number = try self.takeNumber() };
+        },
     }
 }
