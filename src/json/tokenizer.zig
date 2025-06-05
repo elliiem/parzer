@@ -10,6 +10,7 @@ i: usize,
 pub const ParseError = error{
     InvalidNumber,
     InvalidToken,
+    InvalidString,
 };
 
 const Token = union(enum) {
@@ -129,10 +130,26 @@ fn consumeNull(self: *Tokenizer) ParseError!void {
     }
 }
 
+fn consumeNullTrail(self: *Tokenizer) ParseError!void {
+    defer self.consumeChars(keywords.NULL.len - 1);
+
+    if (!self.peekEql(keywords.NULL[1..])) {
+        return ParseError.InvalidToken;
+    }
+}
+
 fn consumeTrue(self: *Tokenizer) ParseError!void {
     defer self.consumeChars(keywords.TRUE.len);
 
     if (!self.peekEql(keywords.TRUE)) {
+        return ParseError.InvalidToken;
+    }
+}
+
+fn consumeTrueTrail(self: *Tokenizer) ParseError!void {
+    defer self.consumeChars(keywords.TRUE.len - 1);
+
+    if (!self.peekEql(keywords.TRUE[1..])) {
         return ParseError.InvalidToken;
     }
 }
@@ -145,18 +162,30 @@ fn consumeFalse(self: *Tokenizer) ParseError!void {
     }
 }
 
+fn consumeFalseTrail(self: *Tokenizer) ParseError!void {
+    defer self.consumeChars(keywords.FALSE.len - 1);
+
+    if (!self.peekEql(keywords.FALSE[1..])) {
+        return ParseError.InvalidToken;
+    }
+}
+
 pub fn nextExpectBool(self: *Tokenizer) ParseError!bool {
     try self.consumeWhitespace();
 
-    self.assertFilledSource();
+    if (self.isSourceEmpty()) {
+        return ParseError.InvalidToken;
+    }
 
     switch (self.peekChar()) {
         keywords.TRUE[0] => {
-            try self.consumeTrue();
+            self.consumeChar();
+            try self.consumeTrueTrail();
             return true;
         },
         keywords.FALSE[0] => {
-            try self.consumeFalse();
+            self.consumeChar();
+            try self.consumeFalseTrail();
             return false;
         },
         else => {
@@ -168,19 +197,24 @@ pub fn nextExpectBool(self: *Tokenizer) ParseError!bool {
 pub fn nextExpectBoolMaybeNull(self: *Tokenizer) ParseError!?bool {
     try self.consumeWhitespace();
 
-    self.assertFilledSource();
+    if (self.isSourceEmpty()) {
+        return ParseError.InvalidToken;
+    }
 
     switch (self.peekChar()) {
         keywords.TRUE[0] => {
-            try self.consumeTrue();
+            self.consumeChar();
+            try self.consumeTrueTrail();
             return true;
         },
         keywords.FALSE[0] => {
-            try self.consumeFalse();
+            self.consumeChar();
+            try self.consumeFalseTrail();
             return false;
         },
         keywords.NULL[0] => {
-            try self.consumeNull();
+            self.consumeChar();
+            try self.consumeNullTrail();
             return null;
         },
         else => {
@@ -385,7 +419,7 @@ pub fn nextExpectNumberMaybeNull(self: *Tokenizer) ParseError!?[]const u8 {
     }
 
     switch (self.peekChar()) {
-        '1'...'9' => {
+        '0'...'9', '-' => {
             return try self.takeNumberChecked();
         },
         'n' => {
@@ -398,7 +432,70 @@ pub fn nextExpectNumberMaybeNull(self: *Tokenizer) ParseError!?[]const u8 {
     }
 }
 
-//  TODO: String
+fn consumeStringTrail(self: *Tokenizer) ParseError!void {
+    while (!self.isSourceEmpty()) {
+        if (self.takeChar() == keywords.DQUOTE) {
+            return;
+        }
+    }
+
+    return ParseError.InvalidString;
+}
+
+fn consumeString(self: *Tokenizer) ParseError!void {
+    self.assertFilledSource();
+
+    if (self.takeChar() != keywords.DQUOTE) {
+        return ParseError.InvalidString;
+    }
+
+    return self.consumeStringTrail();
+}
+
+pub fn nextExpectString(self: *Tokenizer) ParseError![]const u8 {
+    try self.consumeWhitespace();
+
+    if (self.isSourceEmpty()) {
+        return ParseError.InvalidString;
+    }
+
+    const start = self.i + 1;
+
+    try self.consumeString();
+
+    const end = self.i - 1;
+
+    return self.source[start..end];
+}
+
+pub fn nextExpectStringMaybeNull(self: *Tokenizer) ParseError!?[]const u8 {
+    try self.consumeWhitespace();
+
+    if (self.isSourceEmpty()) {
+        return ParseError.InvalidString;
+    }
+
+    const start = self.i + 1;
+
+    switch (self.peekChar()) {
+        keywords.DQUOTE => {
+            self.consumeChar();
+            try self.consumeStringTrail();
+        },
+        keywords.NULL[0] => {
+            self.consumeChar();
+            try self.consumeNullTrail();
+            return null;
+        },
+        else => {
+            return ParseError.InvalidString;
+        },
+    }
+
+    const end = self.i - 1;
+
+    return self.source[start..end];
+}
 
 // Primitives
 // --------------------------------------------------
