@@ -5,15 +5,18 @@ const keywords = @import("keywords.zig");
 const Tokenizer = @This();
 
 source: []const u8,
-i: usize,
-expects_field: bool,
-epects_list_entry: bool,
+i: usize = 0,
 
 pub const ParseError = error{
     InvalidNumber,
-    InvalidToken,
+    ExpectedNumber,
     InvalidString,
+    ExpectedString,
     InvalidField,
+    ExpectedField,
+    UnexpectedToken,
+    InvalidToken,
+    ExpectedToken,
 };
 
 // --------------------------------------------------
@@ -117,7 +120,7 @@ fn consumeNull(self: *Tokenizer) ParseError!void {
     defer self.consumeChars(keywords.NULL.len);
 
     if (!self.peekEql(keywords.NULL)) {
-        return ParseError.InvalidToken;
+        return ParseError.UnexpectedToken;
     }
 }
 
@@ -161,12 +164,8 @@ fn consumeFalseTrail(self: *Tokenizer) ParseError!void {
     }
 }
 
-pub fn nextExpectBool(self: *Tokenizer) ParseError!bool {
-    try self.consumeWhitespace();
-
-    if (self.isSourceEmpty()) {
-        return ParseError.InvalidToken;
-    }
+pub fn takeBool(self: *Tokenizer) ParseError!bool {
+    self.assertFilledSource();
 
     switch (self.peekChar()) {
         keywords.TRUE[0] => {
@@ -180,12 +179,30 @@ pub fn nextExpectBool(self: *Tokenizer) ParseError!bool {
             return false;
         },
         else => {
-            return ParseError.InvalidToken;
+            return ParseError.UnexpectedToken;
         },
     }
 }
 
-pub fn nextExpectBoolMaybeNull(self: *Tokenizer) ParseError!?bool {
+pub fn takeBoolChecked(self: *Tokenizer) ParseError!bool {
+    if (self.isSourceEmpty()) {
+        return ParseError.ExpectedToken;
+    }
+
+    return self.takeBool();
+}
+
+fn nextExpectBool(self: *Tokenizer) ParseError!bool {
+    try self.consumeWhitespace();
+
+    if (self.isSourceEmpty()) {
+        return ParseError.InvalidToken;
+    }
+
+    return self.takeBool();
+}
+
+fn nextExpectBoolNullable(self: *Tokenizer) ParseError!?bool {
     try self.consumeWhitespace();
 
     if (self.isSourceEmpty()) {
@@ -214,7 +231,7 @@ pub fn nextExpectBoolMaybeNull(self: *Tokenizer) ParseError!?bool {
     }
 }
 
-fn consumeNumberTrail(self: *Tokenizer) ParseError!void {
+fn consumeDecimal(self: *Tokenizer) ParseError!void {
     self.assertFilledSource();
 
     {
@@ -242,12 +259,12 @@ fn consumeNumberTrail(self: *Tokenizer) ParseError!void {
     }
 }
 
-fn consumeNumberTrailChecked(self: *Tokenizer) ParseError!void {
+fn consumeDecimalChecked(self: *Tokenizer) ParseError!void {
     if (self.isSourceEmpty()) {
         return ParseError.InvalidNumber;
     }
 
-    return self.consumeNumberTrail();
+    return self.consumeDecimal();
 }
 
 fn consumeExponent(self: *Tokenizer) ParseError!void {
@@ -256,7 +273,7 @@ fn consumeExponent(self: *Tokenizer) ParseError!void {
     switch (self.peekChar()) {
         '-', '+' => {},
         '0'...'9' => {
-            return self.consumeNumberTrail();
+            return self.consumeDecimal();
         },
         else => {
             return ParseError.InvalidNumber;
@@ -265,7 +282,7 @@ fn consumeExponent(self: *Tokenizer) ParseError!void {
 
     self.consumeChar();
 
-    return self.consumeNumberTrailChecked();
+    return self.consumeDecimalChecked();
 }
 
 fn consumeExponentChecked(self: *Tokenizer) ParseError!void {
@@ -289,7 +306,7 @@ fn consumeNumberRemainder(self: *Tokenizer) ParseError!void {
             },
             '.' => {
                 self.consumeChar();
-                return self.consumeNumberTrail();
+                return self.consumeDecimal();
             },
             else => {
                 return;
@@ -321,7 +338,7 @@ fn consumeNumberUnsignedChecked(self: *Tokenizer) ParseError!void {
     return self.consumeNumberUnsigned();
 }
 
-fn consumeNumberRemainderLeadingZero(self: *Tokenizer) ParseError!void {
+fn consumeNumberLeadingZero(self: *Tokenizer) ParseError!void {
     self.assertFilledSource();
 
     switch (self.peekChar()) {
@@ -334,7 +351,7 @@ fn consumeNumberRemainderLeadingZero(self: *Tokenizer) ParseError!void {
         },
         '.' => {
             self.consumeChar();
-            return self.consumeNumberTrailChecked();
+            return self.consumeDecimalChecked();
         },
         else => {
             return;
@@ -348,7 +365,7 @@ fn consumeNumber(self: *Tokenizer) ParseError!void {
     switch (self.peekChar()) {
         '0' => {
             self.consumeChar();
-            return self.consumeNumberRemainderLeadingZero();
+            return self.consumeNumberLeadingZero();
         },
         '1'...'9' => {
             self.consumeChar();
@@ -364,15 +381,7 @@ fn consumeNumber(self: *Tokenizer) ParseError!void {
     }
 }
 
-fn consumeNumberChecked(self: *Tokenizer) ParseError!void {
-    if (self.isSourceEmpty()) {
-        return ParseError.InvalidNumber;
-    }
-
-    return self.consumeNumber();
-}
-
-fn takeNumber(self: *Tokenizer) ParseError![]const u8 {
+pub fn takeNumber(self: *Tokenizer) ParseError![]const u8 {
     self.assertFilledSource();
 
     const start = self.i;
@@ -384,9 +393,9 @@ fn takeNumber(self: *Tokenizer) ParseError![]const u8 {
     return self.source[start..end];
 }
 
-fn takeNumberChecked(self: *Tokenizer) ParseError![]const u8 {
+pub fn takeNumberChecked(self: *Tokenizer) ParseError![]const u8 {
     if (self.isSourceEmpty()) {
-        return ParseError.InvalidNumber;
+        return ParseError.ExpectedNumber;
     }
 
     return self.takeNumber();
@@ -396,22 +405,22 @@ pub fn nextExpectNumber(self: *Tokenizer) ParseError![]const u8 {
     try self.consumeWhitespace();
 
     if (self.isSourceEmpty()) {
-        return ParseError.InvalidNumber;
+        return ParseError.ExpectedNumber;
     }
 
     return self.takeNumber();
 }
 
-pub fn nextExpectNumberMaybeNull(self: *Tokenizer) ParseError!?[]const u8 {
+pub fn nextExpectNumberNullable(self: *Tokenizer) ParseError!?[]const u8 {
     try self.consumeWhitespace();
 
     if (self.isSourceEmpty()) {
-        return ParseError.InvalidNumber;
+        return ParseError.ExpectedNumber;
     }
 
     switch (self.peekChar()) {
         '0'...'9', '-' => {
-            return try self.takeNumberChecked();
+            return try self.takeNumber();
         },
         'n' => {
             try self.consumeNull();
@@ -433,11 +442,23 @@ fn consumeStringTrail(self: *Tokenizer) ParseError!void {
     return ParseError.InvalidString;
 }
 
+fn takeStringTrail(self: *Tokenizer) ParseError![]const u8 {
+    self.assertFilledSource();
+
+    const start = self.i;
+
+    try self.consumeStringTrail();
+
+    const end = self.i - 1;
+
+    return self.source[start..end];
+}
+
 fn consumeString(self: *Tokenizer) ParseError!void {
     self.assertFilledSource();
 
     if (self.takeChar() != keywords.DQUOTE) {
-        return ParseError.InvalidString;
+        return ParseError.ExpectedString;
     }
 
     return self.consumeStringTrail();
@@ -455,93 +476,132 @@ pub fn takeString(self: *Tokenizer) ParseError![]const u8 {
     return self.source[start..end];
 }
 
-pub fn takeStringTrail(self: *Tokenizer) ParseError![]const u8 {
-    self.assertFilledSource();
+pub fn takeStringChecked(self: *Tokenizer) ParseError![]const u8 {
+    if (self.isSourceEmpty()) {
+        return ParseError.ExpectedString;
+    }
 
-    const start = self.i;
-
-    try self.consumeStringTrail();
-
-    const end = self.i - 1;
-
-    return self.source[start..end];
+    return self.takeString();
 }
 
 pub fn nextExpectString(self: *Tokenizer) ParseError![]const u8 {
     try self.consumeWhitespace();
 
     if (self.isSourceEmpty()) {
-        return ParseError.InvalidString;
+        return ParseError.ExpectedString;
     }
 
     return self.takeString();
 }
 
-pub fn takeStringMaybeNull(self: *Tokenizer) ParseError!?[]const u8 {
-    const start = self.i + 1;
-
-    switch (self.peekChar()) {
-        keywords.DQUOTE => {
-            self.consumeChar();
-            try self.consumeStringTrail();
-        },
-        keywords.NULL[0] => {
-            self.consumeChar();
-            try self.consumeNullTrail();
-            return null;
-        },
-        else => {
-            return ParseError.InvalidString;
-        },
-    }
-
-    const end = self.i - 1;
-
-    return self.source[start..end];
-}
-
-pub fn nextExpectStringMaybeNull(self: *Tokenizer) ParseError!?[]const u8 {
+pub fn nextExpectStringNullable(self: *Tokenizer) ParseError!?[]const u8 {
     try self.consumeWhitespace();
 
     if (self.isSourceEmpty()) {
         return ParseError.InvalidString;
     }
 
-    return self.takeStringMaybeNull();
+    switch (self.takeChar()) {
+        keywords.DQUOTE => {
+            return self.takeStringTrail();
+        },
+        keywords.NULL[0] => {
+            self.consumeNullTrail();
+            return null;
+        },
+        else => {
+            return ParseError.InvalidString;
+        },
+    }
 }
 
 // Primitives
 // --------------------------------------------------
 
-pub const Token = union(enum) {
-    Number: []const u8,
-    String: []const u8,
-    Bool: bool,
-    Field: []const u8,
-    Null: void,
-    ObjectBegin: void,
-    ObjectEnd: void,
-    ArrayBegin: void,
-    ArrayEnd: void,
-    Comma: void,
+pub const TokenType = enum {
+    number,
+    string,
+    bool,
+    field,
+    null,
+    object_begin,
+    object_end,
+    array_begin,
+    array_end,
+    comma,
 };
 
-pub fn takeField(self: *Tokenizer) ParseError![]const u8 {
-    self.assertFilledSource();
+pub const Token = union(TokenType) {
+    number: []const u8,
+    string: []const u8,
+    bool: bool,
+    field: []const u8,
+    null: void,
+    object_begin: void,
+    object_end: void,
+    array_begin: void,
+    array_end: void,
+    comma: void,
+};
 
-    const value = self.takeString() catch {
-        return ParseError.InvalidField;
-    };
-
+pub fn nextExpectField(self: *Tokenizer) ParseError![]const u8 {
     try self.consumeWhitespace();
 
-    self.assertFilledSource();
+    const name = try self.takeString();
 
-    if (self.peekChar() != keywords.COLON) {
+    if (self.isSourceEmpty() or self.takeChar() != keywords.COLON) {
         return ParseError.InvalidField;
     }
 
-    return value;
+    return name;
+}
+
+pub fn takeToken(self: Tokenizer) ParseError!Token {
+    switch (self.peekChar()) {
+        keywords.OBJ_BEGIN => {
+            self.consumeChar();
+            return .object_begin;
+        },
+        keywords.OBJ_END => {
+            self.consumeChar();
+            return .object_end;
+        },
+        keywords.ARR_BEGIN => {
+            self.consumeChar();
+            return .array_begin;
+        },
+        keywords.ARR_END => {
+            self.consumeChar();
+            return .array_end;
+        },
+        keywords.COMMA => {
+            self.consumeChar();
+            return .comma;
+        },
+        keywords.NULL[0] => {
+            self.consumeChar();
+            try self.consumeNullTrail();
+            return .null;
+        },
+        keywords.DQUOTE => {
+            self.consumeChar();
+            const str = try self.takeStringTrail();
+
+            if (!self.isSourceEmpty() and self.peekChar() == keywords.COLON) {
+                self.consumeChar();
+
+                return Token{ .field = str };
+            } else {
+                return Token{ .string = str };
+            }
+        },
+        '0'...'9', '-' => {
+            return Token{ .number = try self.takeNumber() };
+        },
+        else => {
+            return ParseError.InvalidToken;
+        },
+    }
 }
 
 pub fn next(self: *Tokenizer) ParseError!?Token {
@@ -551,46 +611,150 @@ pub fn next(self: *Tokenizer) ParseError!?Token {
         return null;
     }
 
-    switch (self.peekChar()) {
-        keywords.OBJ_BEGIN => {
-            self.consumeChar();
-            return .ObjectBegin;
-        },
-        keywords.OBJ_END => {
-            self.consumeChar();
-            return .ObjectEnd;
-        },
-        keywords.LIST_BEGIN => {
-            self.consumeChar();
-            return .ListBegin;
-        },
-        keywords.LIST_END => {
-            self.consumeChar();
-            return .ListEnd;
-        },
-        keywords.COMMA => {
-            self.consumeChar();
-            return .Comma;
-        },
-        keywords.NULL[0] => {
-            self.consumeChar();
-            try self.consumeNullTrail();
-            return .Null;
-        },
-        keywords.DQUOTE => {
-            self.consumeChar();
-            const str = try self.takeStringTrail();
+    return takeToken();
+}
 
-            if (!self.isSourceEmpty() and self.peekChar() == keywords.COLON) {
-                self.consumeChar();
+pub fn nextExpectAny(self: *Tokenizer) ParseError!Token {
+    return try self.next() orelse ParseError.ExpectedToken;
+}
 
-                return Token{ .Field = str };
-            } else {
-                return Token{ .String = str };
+//  TODO: Implement this to actually consume stuff itself and not care about errors
+pub fn skip(self: *Tokenizer) void {
+    _ = self.next() catch {};
+}
+
+const Peek = struct {
+    value: Token,
+    i: usize,
+};
+
+pub fn peekToken(self: Tokenizer) ParseError!?Peek {
+    var cloned = self;
+
+    return .{ .value = cloned.next() orelse return null, .i = cloned.i };
+}
+
+pub fn peekTokenExpectAny(self: Tokenizer) ParseError!Peek {
+    return try self.peekToken() orelse ParseError.ExpectedToken;
+}
+
+fn tokenValueType(comptime token: TokenType) type {
+    return switch (token) {
+        .number => []const u8,
+        .string => []const u8,
+        .bool => bool,
+        .field => []const u8,
+        else => void,
+    };
+}
+
+pub fn takeTokenExpect(self: *Tokenizer, comptime expected: TokenType) !tokenValueType(expected) {
+    switch (expected) {
+        .number => {
+            return self.takeNumberChecked();
+        },
+        .string => {
+            return self.takeStringChecked();
+        },
+        .bool => {
+            return self.takeBoolChecked();
+        },
+        .field => {
+            return self.nextExpectField();
+        },
+        .null => {
+            return self.consumeNull();
+        },
+        .object_begin => {
+            if (self.takeChar() != keywords.OBJ_BEGIN) {
+                return ParseError.UnexpectedToken;
             }
         },
-        '0'...'9', '-' => {
-            return Token{ .Number = try self.takeNumber() };
+        .object_end => {
+            if (self.takeChar() != keywords.OBJ_END) {
+                return ParseError.UnexpectedToken;
+            }
+        },
+        .array_begin => {
+            if (self.takeChar() != keywords.ARR_BEGIN) {
+                return ParseError.UnexpectedToken;
+            }
+        },
+        .array_end => {
+            if (self.takeChar() != keywords.ARR_END) {
+                return ParseError.UnexpectedToken;
+            }
+        },
+        .comma => {
+            if (self.takeChar() != keywords.COMMA) {
+                return ParseError.UnexpectedToken;
+            }
+        },
+    }
+}
+
+pub fn nextExpect(self: *Tokenizer, comptime expected: TokenType) !tokenValueType(expected) {
+    try self.consumeWhitespace();
+
+    return self.takeTokenExpect(expected);
+}
+
+fn tokenValueTypeNullable(comptime token: TokenType) type {
+    return switch (token) {
+        .number => ?[]const u8,
+        .string => ?[]const u8,
+        .bool => ?bool,
+        .field => ?[]const u8,
+        else => void,
+    };
+}
+
+pub fn nextExpectNullable(self: *Tokenizer, comptime expected: TokenType) ?tokenValueTypeNullable(expected) {
+    switch (expected) {
+        .number => {
+            return self.nextExpectNumberNullable();
+        },
+        .string => {
+            return self.nextExpectStringNullable();
+        },
+        .bool => {
+            return self.nextExpectBoolNullable();
+        },
+        .field => {
+            return self.nextExpectField();
+        },
+        .null => {
+            return self.consumeNull();
+        },
+        .object_begin => {
+            self.consumeWhitespace();
+            if (self.takeChar() != keywords.OBJ_BEGIN) {
+                return ParseError.UnexpectedToken;
+            }
+        },
+        .object_end => {
+            self.consumeWhitespace();
+            if (self.takeChar() != keywords.OBJ_END) {
+                return ParseError.UnexpectedToken;
+            }
+        },
+        .array_begin => {
+            self.consumeWhitespace();
+            if (self.takeChar() != keywords.ARR_BEGIN) {
+                return ParseError.UnexpectedToken;
+            }
+        },
+        .array_end => {
+            self.consumeWhitespace();
+            if (self.takeChar() != keywords.ARR_END) {
+                return ParseError.UnexpectedToken;
+            }
+        },
+        .comma => {
+            self.consumeWhitespace();
+            if (self.takeChar() != keywords.COMMA) {
+                return ParseError.UnexpectedToken;
+            }
         },
     }
 }
