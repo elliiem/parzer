@@ -1,6 +1,9 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 const Tokenizer = @import("tokenizer.zig");
+
+const TokenType = Tokenizer.TokenType;
 
 pub const DeserializeError = error{
     ArrayTooShort,
@@ -9,7 +12,7 @@ pub const DeserializeError = error{
 
 pub const DeserializeOpts = struct {
     allow_trailing_comma: bool = true,
-    precice_errors: bool = false,
+    precice_errors: bool = builtin.mode == .Debug,
 };
 
 inline fn deserializeBool(source: *Tokenizer) !bool {
@@ -45,23 +48,29 @@ inline fn deserializePointer(comptime T: type, source: *Tokenizer) !T {
     }
 }
 
-inline fn deserializeEmptyArray(comptime T: type, source: *Tokenizer, comptime opts: DeserializeOpts) DeserializeError!void {
-    const info = switch (@typeInfo(T)) {
-        .array => |info| info,
-        else => {
-            unreachable;
-        },
-    };
-
-    if (info.len > 0) {
-        @compileError("Expected empty array!");
+inline fn deserializeEmptyArray(
+    comptime T: type,
+    source: *Tokenizer,
+    comptime opts: DeserializeOpts,
+) DeserializeError!void {
+    if (arrayLenght(T) > 0) {
+        @compileError("Expected array with lenght 0!");
     }
 
     try source.nextTokenExpectChecked(.array_begin);
 
     if (opts.precice_errors) {
-        switch (try source.nextTokenChecked()) {
+        const token = try source.nextTokenChecked();
+
+        switch (token) {
             .array_end => {},
+            else => {
+                if (identifierFitsType(std.meta.Child(T), token, opts)) {
+                    return DeserializeError.ArrayTooLong;
+                } else {
+                    return DeserializeError.UnexpectedToken;
+                }
+            },
         }
     } else {
         try source.nextTokenExpectChecked(.array_end);
@@ -70,23 +79,60 @@ inline fn deserializeEmptyArray(comptime T: type, source: *Tokenizer, comptime o
     return;
 }
 
-fn deserializeArray(comptime T: type, array: *T, source: *Tokenizer, comptime opts: DeserializeOpts) DeserializeError!void {
+inline fn identifierFitsType(
+    comptime T: type,
+    identifier: TokenType,
+    comptime opts: DeserializeOpts,
+) bool {
+    switch (@typeInfo(T)) {
+        .bool => {
+            return identifier == .bool;
+        },
+        .int, .comptime_int, .float, .comptime_float => {
+            return identifier == .number;
+        },
+        .pointer => |info| {
+            switch (info.size) {
+                .slice => {
+                    return identifier == .array_begin;
+                },
+                else => {
+                    return identifierFitsType(info.child, identifier, opts);
+                },
+            }
+        },
+        else => {
+            return false;
+        },
+    }
+}
+
+inline fn arrayLenght(comptime T: type) comptime_int {
     const info = switch (@typeInfo(T)) {
         .array => |info| info,
         else => {
-            unreachable;
+            @compileError("Expected T to be an array!");
         },
     };
 
-    if (info.len == 0) {
+    return info.len;
+}
+
+fn deserializeArray(
+    comptime T: type,
+    array: *T,
+    source: *Tokenizer,
+    comptime opts: DeserializeOpts,
+) DeserializeError!void {
+    if (arrayLenght(T) == 0) {
         return deserializeEmptyArray(T, source, opts);
     }
 
     try source.nextTokenExpectChecked(.array_begin);
 
     { // consume items
-        for (0..info.len - 1) |i| {
-            try deserializeField(info.child, &array[i], source, opts);
+        for (0..arrayLenght(T) - 1) |i| {
+            try deserializeField(std.meta.Child(T), &array[i], source, opts);
 
             switch (try source.nextTokenChecked()) {
                 .comma => {},
@@ -99,7 +145,7 @@ fn deserializeArray(comptime T: type, array: *T, source: *Tokenizer, comptime op
             }
         }
 
-        try deserializeField(info.child, &array[info.len - 1], source, opts);
+        try deserializeField(std.meta.Child(T), &array[arrayLenght(T) - 1], source, opts);
     }
 
     { // consume end
@@ -107,7 +153,23 @@ fn deserializeArray(comptime T: type, array: *T, source: *Tokenizer, comptime op
             switch (try source.nextTokenChecked()) {
                 .array_end => {},
                 .comma => {
-                    try source.nextTokenExpectChecked(.array_end);
+                    //  NOTE: Maybe unnececary to check for precice errors here. Maybe just check always?
+                    if (opts.precice_errors) {
+                        const token = try source.nextTokenChecked();
+
+                        switch (token) {
+                            .array_end => {},
+                            else => {
+                                if (identifierFitsType(std.meta.Child(T), token, opts)) {
+                                    return DeserializeError.ArrayTooLong;
+                                }
+
+                                return DeserializeError.UnexpectedToken;
+                            },
+                        }
+                    } else {
+                        try source.nextTokenExpectChecked(.array_end);
+                    }
                 },
                 else => {
                     return DeserializeError.UnexpectedToken;
