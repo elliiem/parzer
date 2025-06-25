@@ -9,20 +9,21 @@ pub const DeserializeError = error{
 
 pub const DeserializeOpts = struct {
     allow_trailing_comma: bool = true,
+    precice_errors: bool = false,
 };
 
 inline fn deserializeBool(source: *Tokenizer) !bool {
-    return source.nextExpect(.bool);
+    return source.nextTokenExpect(.bool);
 }
 
 inline fn deserializeInt(comptime T: type, source: *Tokenizer) !T {
-    const number = try source.nextExpect(.number);
+    const number = try source.nextTokenExpect(.number);
 
     return std.fmt.parseInt(T, number, 10) catch return Tokenizer.ParseError.InvalidNumber;
 }
 
 inline fn deserializeFloat(comptime T: type, source: *Tokenizer) !T {
-    const number = try source.nextExpect(.number);
+    const number = try source.nextTokenExpect(.number);
 
     return std.fmt.parseFloat(T, number) catch return Tokenizer.ParseError.InvalidNumber;
 }
@@ -33,14 +34,10 @@ inline fn deserializePointer(comptime T: type, source: *Tokenizer) !T {
     switch (info.size) {
         .slice => {
             if (comptime std.mem.eql(u8, @typeName(T), @typeName([]const u8))) {
-                return source.nextExpect(.string);
+                return source.nextTokenExpect(.string);
             }
 
-            if (comptime std.mem.eql(u8, @typeName(T), @typeName([]u8))) {
-                @compileError("Slices of type []u8 are not allowed while parsing unallocated! Consider using deserializeAlloc() or changing the type to a string ([]const u8).");
-            }
-
-            @compileError("Slices are not allowed while parsing unallocated! Consider using deserializeAlloc().");
+            @compileError("Slices (exept strings ([]const u8)) are not allowed while parsing unallocated! Consider using deserializeAlloc().");
         },
         else => {
             @compileError("Pointers are not allowed while parsing unallocated! Consider using deserializeAlloc().");
@@ -48,7 +45,32 @@ inline fn deserializePointer(comptime T: type, source: *Tokenizer) !T {
     }
 }
 
-inline fn deserializeArray(comptime T: type, array: *T, source: *Tokenizer, comptime opts: DeserializeOpts) DeserializeError!void {
+inline fn deserializeEmptyArray(comptime T: type, source: *Tokenizer, comptime opts: DeserializeOpts) DeserializeError!void {
+    const info = switch (@typeInfo(T)) {
+        .array => |info| info,
+        else => {
+            unreachable;
+        },
+    };
+
+    if (info.len > 0) {
+        @compileError("Expected empty array!");
+    }
+
+    try source.nextTokenExpectChecked(.array_begin);
+
+    if (opts.precice_errors) {
+        switch (try source.nextTokenChecked()) {
+            .array_end => {},
+        }
+    } else {
+        try source.nextTokenExpectChecked(.array_end);
+    }
+
+    return;
+}
+
+fn deserializeArray(comptime T: type, array: *T, source: *Tokenizer, comptime opts: DeserializeOpts) DeserializeError!void {
     const info = switch (@typeInfo(T)) {
         .array => |info| info,
         else => {
@@ -57,19 +79,16 @@ inline fn deserializeArray(comptime T: type, array: *T, source: *Tokenizer, comp
     };
 
     if (info.len == 0) {
-        try source.nextExpect(.array_begin);
-        try source.nextExpect(.array_end);
-
-        return;
+        return deserializeEmptyArray(T, source, opts);
     }
 
-    try source.nextExpect(.array_begin);
+    try source.nextTokenExpectChecked(.array_begin);
 
     { // consume items
         for (0..info.len - 1) |i| {
             try deserializeField(info.child, &array[i], source, opts);
 
-            switch (try source.nextExpectAny()) {
+            switch (try source.nextTokenChecked()) {
                 .comma => {},
                 .array_end => {
                     return DeserializeError.ArrayTooShort;
@@ -85,17 +104,17 @@ inline fn deserializeArray(comptime T: type, array: *T, source: *Tokenizer, comp
 
     { // consume end
         if (opts.allow_trailing_comma) {
-            switch (try source.nextExpectAny()) {
+            switch (try source.nextTokenChecked()) {
                 .array_end => {},
                 .comma => {
-                    try source.nextExpect(.array_end);
+                    try source.nextTokenExpectChecked(.array_end);
                 },
                 else => {
                     return DeserializeError.UnexpectedToken;
                 },
             }
         } else {
-            return source.nextExpect(.array_end);
+            return source.nextTokenExpectChecked(.array_end);
         }
     }
 }
@@ -118,7 +137,6 @@ pub inline fn deserializeField(comptime T: type, field: *T, source: *Tokenizer, 
             return deserializeArray(T, field, source, opts);
         },
         else => {
-            //  TODO: Better error message
             @compileError("Invalid type!");
         },
     }
