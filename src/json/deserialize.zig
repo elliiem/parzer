@@ -71,6 +71,8 @@ inline fn deserializeInteger(
     source: *Tokenizer,
     comptime opts: DeserializeOpts,
 ) DeserializeError!T {
+    common.expectInt(T);
+
     const number = try common.nextTokenExpect(source, .number, opts);
 
     return std.fmt.parseInt(T, number, 10) catch return Tokenizer.ParseError.InvalidNumber;
@@ -79,9 +81,11 @@ inline fn deserializeInteger(
 inline fn deserializeIntegerInferred(
     comptime T: type,
     source: *Tokenizer,
-    peek: u8,
+    peeked: u8,
 ) DeserializeError!T {
-    const number = try source.takeTokenExpectPeek(peek, .number);
+    common.expectInt(T);
+
+    const number = try source.takeTokenExpectPeek(peeked, .number);
 
     return std.fmt.parseInt(T, number, 10) catch return Tokenizer.ParseError.InvalidNumber;
 }
@@ -91,6 +95,8 @@ inline fn deserializeOptionalInteger(
     source: *Tokenizer,
     comptime opts: DeserializeOpts,
 ) DeserializeError!T {
+    common.expectInt(T);
+
     const number = try common.nextTokenExpectNullable(source, .number, opts) orelse return null;
 
     return std.fmt.parseInt(T, number, 10) catch return Tokenizer.ParseError.InvalidNumber;
@@ -99,9 +105,11 @@ inline fn deserializeOptionalInteger(
 inline fn deserializeOptionalIntegerInferred(
     comptime T: type,
     source: *Tokenizer,
-    peek: u8,
+    peeked: u8,
 ) DeserializeError!T {
-    const number = try source.takeTokenExpectNullablePeek(peek, .number);
+    common.expectInt(T);
+
+    const number = try source.takeTokenExpectNullablePeek(peeked, .number);
 
     return std.fmt.parseInt(T, number, 10) catch return Tokenizer.ParseError.InvalidNumber;
 }
@@ -111,6 +119,8 @@ inline fn deserializeFloat(
     source: *Tokenizer,
     comptime opts: DeserializeOpts,
 ) DeserializeError!T {
+    common.expectFloat(T);
+
     const number = try common.nextTokenExpect(source, .number, opts);
 
     return std.fmt.parseFloat(T, number) catch return Tokenizer.ParseError.InvalidNumber;
@@ -119,9 +129,11 @@ inline fn deserializeFloat(
 inline fn deserializeFloatInferred(
     comptime T: type,
     source: *Tokenizer,
-    peek: u8,
+    peeked: u8,
 ) DeserializeError!T {
-    const number = try source.takeTokenExpectPeek(peek, .number);
+    common.expectFloat(T);
+
+    const number = try source.takeTokenExpectPeek(peeked, .number);
 
     return std.fmt.parseFloat(T, number) catch return Tokenizer.ParseError.InvalidNumber;
 }
@@ -131,6 +143,8 @@ inline fn deserializeOptionalFloat(
     source: *Tokenizer,
     comptime opts: DeserializeOpts,
 ) DeserializeError!T {
+    common.expectFloat(T);
+
     const number = try common.nextTokenExpectNullable(source, .number, opts) orelse return null;
 
     return std.fmt.parseFloat(T, number) catch return Tokenizer.ParseError.InvalidNumber;
@@ -139,9 +153,11 @@ inline fn deserializeOptionalFloat(
 inline fn deserializeOptionalFloatInferred(
     comptime T: type,
     source: *Tokenizer,
-    peek: u8,
+    peeked: u8,
 ) DeserializeError!?T {
-    const number = try source.takeTokenExpectNullablePeek(peek, .number) orelse return null;
+    common.expectFloat(T);
+
+    const number = try source.takeTokenExpectNullablePeek(peeked, .number) orelse return null;
 
     return std.fmt.parseFloat(T, number) catch return Tokenizer.ParseError.InvalidNumber;
 }
@@ -150,29 +166,36 @@ inline fn deserializeString(
     source: *Tokenizer,
     comptime opts: DeserializeOpts,
 ) DeserializeError![]const u8 {
-    if (opts.whitespace) {
-        return source.nextTokenExpect(.string);
-    } else {
-        return source.takeTokenExpect(.string);
-    }
+    return common.nextTokenExpect(source, .string, opts);
+}
+
+inline fn deserializeStringInferred(
+    source: *Tokenizer,
+) DeserializeError![]const u8 {
+    return source.takeStringAssume();
 }
 
 inline fn deserializeOptionalString(
     source: *Tokenizer,
     comptime opts: DeserializeOpts,
 ) DeserializeOpts!?[]const u8 {
-    if (opts.whitespace) {
-        return source.nextTokenExpectNullable(.string);
-    } else {
-        return source.takeTokenExpectNullable(.string);
-    }
+    return common.nextTokenExpectNullable(source, .string, opts);
+}
+
+inline fn deserializeOptionalStringInferred(
+    source: *Tokenizer,
+    peeked: u8,
+) DeserializeError![]const u8 {
+    return source.takeNullableString(peeked);
 }
 
 inline fn deserializePointer(
     comptime T: type,
     source: *Tokenizer,
     comptime opts: DeserializeOpts,
-) !T {
+) DeserializeError!T {
+    common.expectPointer(T);
+
     const info = @typeInfo(T).pointer;
 
     switch (info.size) {
@@ -189,11 +212,38 @@ inline fn deserializePointer(
     }
 }
 
+inline fn deserializePointerInferred(
+    comptime T: type,
+    source: *Tokenizer,
+    // peeked: u8,
+    // comptime token_type: TokenTypePrimitive,
+    // comptime opts: DeserializeOpts,
+) DeserializeError!T {
+    common.expectPointer(T);
+
+    const info = @typeInfo(T).pointer;
+
+    switch (info.size) {
+        .slice => {
+            if (comptime std.mem.eql(u8, @typeName(T), @typeName([]const u8))) {
+                return deserializeStringInferred(source);
+            }
+
+            @compileError("Slices (exept strings ([]const u8)) are not allowed while parsing unallocated! Consider using deserializeAlloc().");
+        },
+        else => {
+            @compileError("Pointers are not allowed while parsing unallocated! Consider using deserializeAlloc().");
+        },
+    }
+}
+
 inline fn deserializeOptionalPointer(
     comptime T: type,
     source: *Tokenizer,
     comptime opts: DeserializeOpts,
 ) !T {
+    common.expectPointer(T);
+
     const info = @typeInfo(T).pointer;
 
     switch (info.size) {
@@ -217,21 +267,21 @@ fn deserializeArrayItem(
     comptime opts: DeserializeOpts,
 ) DeserializeError!void {
     if (opts.precice_errors) {
-        const peek = try common.peekNext(source, opts) orelse return DeserializeError.ExpectedToken;
+        const peeked = try common.peekNext(source, opts) orelse return DeserializeError.ExpectedToken;
 
-        switch (Tokenizer.inferrTokenType(peek) orelse return DeserializeError.InvalidToken) {
+        switch (Tokenizer.inferrTokenType(peeked) orelse return DeserializeError.InvalidToken) {
             .comma => {
                 return DeserializeError.MissingArrayItem;
             },
             .array_end => {
                 return DeserializeError.ArrayTooShort;
             },
-            inline else => |inferred_type| {
-                if (!common.tokenFitsType(T, inferred_type)) {
+            inline else => |token_type| {
+                if (common.tokenFitsType(T, token_type, opts)) {
+                    try deserializeFieldInferred(T, item, source, peeked, token_type, opts);
+                } else {
                     return common.expectedError(T);
                 }
-
-                try deserializeFieldInferred(T, item, source, peek, inferred_type, opts);
             },
         }
     } else {
@@ -239,7 +289,34 @@ fn deserializeArrayItem(
     }
 }
 
-fn deserializeEmptyArray(
+fn deserializeEmptyArrayInferred(
+    comptime T: type,
+    source: *Tokenizer,
+    comptime opts: DeserializeOpts,
+) DeserializeError!void {
+    common.expectArray(T);
+
+    if (common.arrayLenght(T) > 0) {
+        @compileError("Expected array with lenght 0!");
+    }
+
+    if (opts.precice_errors) {
+        switch (try common.inferrNext(source, opts)) {
+            .array_end => {},
+            inline else => |token_type| {
+                if (common.tokenFitsType(std.meta.Child(T), token_type, opts)) {
+                    return DeserializeError.ArrayTooLong;
+                }
+
+                return common.expectedError(std.meta.Child(T));
+            },
+        }
+    } else {
+        try common.nextTokenExpect(source, .array_end, opts);
+    }
+}
+
+inline fn deserializeEmptyArray(
     comptime T: type,
     source: *Tokenizer,
     comptime opts: DeserializeOpts,
@@ -252,25 +329,10 @@ fn deserializeEmptyArray(
 
     try source.nextTokenExpect(.array_begin);
 
-    if (opts.precice_errors) {
-        const peek = try common.peekNext(source, opts) orelse return DeserializeError.ExpectedToken;
-
-        switch (Tokenizer.inferrTokenType(peek) orelse return DeserializeError.InvalidToken) {
-            .array_end => {},
-            inline else => |inferred_type| {
-                if (common.tokenFitsType(std.meta.Child(T), inferred_type)) {
-                    return DeserializeError.ArrayTooLong;
-                }
-
-                return common.expectedError(std.meta.Child(T));
-            },
-        }
-    } else {
-        try common.nextTokenExpect(source, .array_end, opts);
-    }
+    return deserializeEmptyArrayInferred(T, source, opts);
 }
 
-pub fn deserializeArray(
+fn deserializeArrayInferred(
     comptime T: type,
     array: *T,
     source: *Tokenizer,
@@ -279,10 +341,8 @@ pub fn deserializeArray(
     common.expectArray(T);
 
     if (common.arrayLenght(T) == 0) {
-        return deserializeEmptyArray(T, source, opts);
+        return deserializeEmptyArrayInferred(T, source, opts);
     }
-
-    try common.nextTokenExpect(source, .array_begin, opts);
 
     { // deserialize items
         for (0..common.arrayLenght(T) - 1) |i| {
@@ -353,6 +413,23 @@ pub fn deserializeArray(
     }
 }
 
+pub inline fn deserializeArray(
+    comptime T: type,
+    array: *T,
+    source: *Tokenizer,
+    comptime opts: DeserializeOpts,
+) DeserializeError!void {
+    common.expectArray(T);
+
+    if (common.arrayLenght(T) == 0) {
+        return deserializeEmptyArray(T, source, opts);
+    }
+
+    try common.nextTokenExpect(source, .array_begin, opts);
+
+    return deserializeArrayInferred(T, array, source, opts);
+}
+
 pub inline fn deserializeField(
     comptime T: type,
     field: *T,
@@ -385,21 +462,29 @@ pub inline fn deserializeFieldInferred(
     comptime T: type,
     field: *T,
     source: *Tokenizer,
-    peek: u8,
+    peeked: u8,
     comptime token_type: TokenTypePrimitive,
     comptime opts: DeserializeOpts,
 ) DeserializeError!void {
-    _ = opts;
+    if (!common.tokenFitsType(T, token_type, opts)) {
+        @compileError("Inferred token type doesnt fit the type");
+    }
 
     switch (@typeInfo(T)) {
         .bool => {
             field.* = try deserializeBooleanInferred(source, token_type);
         },
         .int, .comptime_int => {
-            field.* = try deserializeIntegerInferred(T, source, peek);
+            field.* = try deserializeIntegerInferred(T, source, peeked);
         },
         .float, .comptime_float => {
-            field.* = try deserializeFloatInferred(T, source, peek);
+            field.* = try deserializeFloatInferred(T, source, peeked);
+        },
+        .pointer => {
+            field.* = try deserializePointerInferred(T, source);
+        },
+        .array => {
+            try deserializeArrayInferred(T, field, source, opts);
         },
         else => {
             @compileError("Unimplemented type!");

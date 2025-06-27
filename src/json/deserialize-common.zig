@@ -31,7 +31,10 @@ pub const DeserializeOpts = struct {
 pub inline fn tokenFitsType(
     comptime T: type,
     token_type: TokenTypePrimitive,
+    opts: DeserializeOpts,
 ) bool {
+    _ = opts;
+
     switch (@typeInfo(T)) {
         .bool => {
             return token_type == .true or token_type == .false;
@@ -117,13 +120,49 @@ pub fn expectedError(
     }
 }
 
-pub fn expectArray(comptime T: type) void {
-    _ = switch (@typeInfo(T)) {
-        .array => |info| info,
+pub fn expectBoolean(comptime T: type) void {
+    switch (@typeInfo(T)) {
+        .bool => {},
         else => {
             @compileError("Expected T to be an array!");
         },
-    };
+    }
+}
+
+pub fn expectInt(comptime T: type) void {
+    switch (@typeInfo(T)) {
+        .int, .comptime_int => {},
+        else => {
+            @compileError("Expected T to be an array!");
+        },
+    }
+}
+
+pub fn expectFloat(comptime T: type) void {
+    switch (@typeInfo(T)) {
+        .float, .comptime_float => {},
+        else => {
+            @compileError("Expected T to be an array!");
+        },
+    }
+}
+
+pub fn expectPointer(comptime T: type) void {
+    switch (@typeInfo(T)) {
+        .pointer => {},
+        else => {
+            @compileError("Expected T to be an array!");
+        },
+    }
+}
+
+pub fn expectArray(comptime T: type) void {
+    switch (@typeInfo(T)) {
+        .array => {},
+        else => {
+            @compileError("Expected T to be an array!");
+        },
+    }
 }
 
 pub fn arrayLenght(comptime T: type) comptime_int {
