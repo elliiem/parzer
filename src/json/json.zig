@@ -1,4 +1,8 @@
 pub const Tokenizer = @import("tokenizer.zig");
 
+pub const DeserializeOpts = @import("deserialize-common.zig").DeserializeOpts;
+
 pub const deserialize = @import("deserialize.zig").deserialize;
-pub const deserializeField = @import("deserialize.zig").deserializeField;
+
+// tmp
+pub const deserializeArray = @import("deserialize.zig").deserializeArray;
