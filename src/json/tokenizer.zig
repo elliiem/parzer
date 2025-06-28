@@ -25,7 +25,7 @@ inline fn remaining(
     return self.source.len - self.i;
 }
 
-inline fn isSourceEmpty(
+pub inline fn isSourceEmpty(
     self: Tokenizer,
 ) bool {
     return self.i >= self.source.len;
@@ -123,8 +123,8 @@ fn consumeComment(
 pub fn consumeWhitespace(
     self: *Tokenizer,
 ) ParseError!?u8 {
-    while (self.takeChar()) |ch| {
-        switch (ch) {
+    while (!self.isSourceEmpty()) {
+        switch (self.takeCharAssume()) {
             '\t', '\n', '\r', ' ' => {},
             '/' => {
                 if (self.isSourceEmpty() or self.takeCharAssume() != '/') {
@@ -133,7 +133,7 @@ pub fn consumeWhitespace(
 
                 self.consumeComment();
             },
-            else => {
+            else => |ch| {
                 return ch;
             },
         }

@@ -278,14 +278,14 @@ fn deserializeArrayItem(
             },
             inline else => |token_type| {
                 if (common.tokenFitsType(T, token_type, opts)) {
-                    try deserializeFieldInferred(T, item, source, peeked, token_type, opts);
+                    try deserializeInnerInferred(T, item, source, peeked, token_type, opts);
                 } else {
                     return common.expectedError(T);
                 }
             },
         }
     } else {
-        try deserializeField(T, item, source, opts);
+        try deserializeInner(T, item, source, opts);
     }
 }
 
@@ -430,7 +430,204 @@ pub inline fn deserializeArray(
     return deserializeArrayInferred(T, array, source, opts);
 }
 
-pub inline fn deserializeField(
+fn checkSeenFields(
+    comptime T: type,
+    seen: []bool,
+) DeserializeError!void {
+    common.expectStruct(T);
+
+    const fields = @typeInfo(T).@"struct".fields;
+
+    inline for (fields, 0..) |field, i| {
+        switch (@typeInfo(field.type)) {
+            .optional => {},
+            else => {
+                if (!seen[i]) {
+                    return DeserializeError.MissingField;
+                }
+            },
+        }
+    }
+}
+
+fn deserialzeStructInferred(
+    comptime T: type,
+    dest: *T,
+    source: *Tokenizer,
+    comptime opts: DeserializeOpts,
+) DeserializeError!void {
+    common.expectStruct(T);
+
+    const info = @typeInfo(T).@"struct";
+
+    var seen = [1]bool{false} ** info.fields.len;
+
+    { // Parse first field
+        const field_name = switch (try common.inferrNext(source, opts)) {
+            .string => try source.takeFieldAssume(),
+            .object_end => {
+                return checkSeenFields(T, &seen);
+            },
+            else => {
+                return DeserializeError.ExpectedField;
+            },
+        };
+
+        const peeked = try common.peekNext(source, opts) orelse return DeserializeError.ExpectedToken;
+
+        switch (Tokenizer.inferrTokenType(peeked) orelse return DeserializeError.InvalidToken) {
+            inline else => |token_type| {
+                try deserializeFieldInferred(
+                    T,
+                    dest,
+                    source,
+                    peeked,
+                    token_type,
+                    field_name,
+                    &seen,
+                    opts,
+                );
+            },
+        }
+
+        switch (try common.inferrNext(source, opts)) {
+            .comma => {
+                switch (try common.inferrNext(source, opts)) {
+                    .string => {},
+                    .object_end => {
+                        if (!opts.allow_trailing_comma) {
+                            return DeserializeError.TrailingComma;
+                        }
+
+                        return checkSeenFields(T, &seen);
+                    },
+                    .comma => {
+                        return DeserializeError.MissingField;
+                    },
+                    else => {
+                        return DeserializeError.UnexpectedToken;
+                    },
+                }
+            },
+            .object_end => {
+                return checkSeenFields(T, &seen);
+            },
+            .string => {
+                return DeserializeError.MissingComma;
+            },
+            else => {
+                return DeserializeError.UnexpectedToken;
+            },
+        }
+    }
+
+    // Parse remaining
+    while (true) {
+        const field_name = try source.takeFieldAssume();
+
+        const peeked = source.takeChar() orelse return DeserializeError.ExpectedToken;
+
+        switch (Tokenizer.inferrTokenType(peeked) orelse return DeserializeError.InvalidToken) {
+            inline else => |token_type| {
+                try deserializeFieldInferred(
+                    T,
+                    dest,
+                    source,
+                    peeked,
+                    token_type,
+                    field_name,
+                    &seen,
+                    opts,
+                );
+            },
+        }
+
+        switch (try common.inferrNext(source, opts)) {
+            .comma => {
+                switch (try common.inferrNext(source, opts)) {
+                    .string => {},
+                    .object_end => {
+                        if (!opts.allow_trailing_comma) {
+                            return DeserializeError.TrailingComma;
+                        }
+
+                        return checkSeenFields(T, &seen);
+                    },
+                    .comma => {
+                        return DeserializeError.MissingField;
+                    },
+                    else => {
+                        return DeserializeError.UnexpectedToken;
+                    },
+                }
+            },
+            .object_end => {
+                return checkSeenFields(T, &seen);
+            },
+            .string => {
+                return DeserializeError.MissingComma;
+            },
+            else => {
+                return DeserializeError.UnexpectedToken;
+            },
+        }
+    }
+}
+
+fn deserializeFieldInferred(
+    comptime T: type,
+    dest: *T,
+    source: *Tokenizer,
+    peeked: u8,
+    comptime token_type: TokenTypePrimitive,
+    name: []const u8,
+    seen: []bool,
+    comptime opts: DeserializeOpts,
+) DeserializeError!void {
+    common.expectStruct(T);
+
+    const info = @typeInfo(T).@"struct";
+
+    inline for (info.fields, 0..) |field, i| {
+        if (std.mem.eql(u8, name, field.name)) {
+            if (seen[i]) {
+                return DeserializeError.DuplicateField;
+            } else {
+                seen[i] = true;
+            }
+
+            if (!common.tokenFitsType(field.type, token_type, opts)) {
+                return common.expectedError(field.type);
+            }
+
+            try deserializeInnerInferred(
+                field.type,
+                &@field(dest.*, field.name),
+                source,
+                peeked,
+                token_type,
+                opts,
+            );
+        } else {
+            return DeserializeError.UnknownField;
+        }
+    }
+}
+
+pub inline fn deserializeStruct(
+    comptime T: type,
+    dest: *T,
+    source: *Tokenizer,
+    comptime opts: DeserializeOpts,
+) DeserializeError!void {
+    common.expectStruct(T);
+
+    try common.nextTokenExpect(source, .object_begin, opts);
+
+    return deserialzeStructInferred(T, dest, source, opts);
+}
+
+pub inline fn deserializeInner(
     comptime T: type,
     field: *T,
     source: *Tokenizer,
@@ -458,7 +655,7 @@ pub inline fn deserializeField(
     }
 }
 
-pub inline fn deserializeFieldInferred(
+pub inline fn deserializeInnerInferred(
     comptime T: type,
     field: *T,
     source: *Tokenizer,
@@ -508,6 +705,13 @@ pub fn deserialzeFromSource(comptime T: type, source: *Tokenizer, comptime opts:
         },
         .array => {
             @compileError("Arrays are only allowed as fields when parsing unallocated! Consider using deserializeAlloc().");
+        },
+        .@"struct" => {
+            var dest: T = undefined;
+
+            try deserializeStruct(T, &dest, source, opts);
+
+            return dest;
         },
         else => {
             @compileError("Unimplemented type!");

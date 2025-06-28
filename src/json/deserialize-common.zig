@@ -20,6 +20,9 @@ pub const DeserializeError = error{
     TrailingComma,
     MissingComma,
     MissingArrayItem,
+    MissingField,
+    UnknownField,
+    DuplicateField,
 } || Tokenizer.ParseError;
 
 pub const DeserializeOpts = struct {
@@ -159,6 +162,15 @@ pub fn expectPointer(comptime T: type) void {
 pub fn expectArray(comptime T: type) void {
     switch (@typeInfo(T)) {
         .array => {},
+        else => {
+            @compileError("Expected T to be an array!");
+        },
+    }
+}
+
+pub fn expectStruct(comptime T: type) void {
+    switch (@typeInfo(T)) {
+        .@"struct" => {},
         else => {
             @compileError("Expected T to be an array!");
         },
