@@ -23,6 +23,7 @@ pub const DeserializeError = error{
     MissingField,
     UnknownField,
     DuplicateField,
+    IllegalWhitespace,
 } || Tokenizer.ParseError;
 
 pub const DeserializeOpts = struct {
@@ -190,17 +191,45 @@ pub inline fn peekNext(
     if (opts.whitespace) {
         return source.consumeWhitespace();
     } else {
-        return source.takeChar();
+        if (opts.precice_errors) {
+            const peeked = source.takeChar() orelse return null;
+
+            return switch (peeked) {
+                else => peeked,
+                ' ', '\n', '\r', '\t' => {
+                    return DeserializeError.IllegalWhitespace;
+                },
+            };
+        } else {
+            return source.takeChar();
+        }
     }
 }
 
-pub inline fn inferrNext(
+pub inline fn inferrNextDiscard(
     source: *Tokenizer,
     comptime opts: DeserializeOpts,
 ) DeserializeError!TokenTypePrimitive {
     const peek = try peekNext(source, opts) orelse return DeserializeError.ExpectedToken;
 
     return Tokenizer.inferrTokenType(peek) orelse return DeserializeError.InvalidToken;
+}
+
+pub const Inferred = struct {
+    token_type: TokenTypePrimitive,
+    peeked: u8,
+};
+
+pub inline fn inferrNext(
+    source: *Tokenizer,
+    comptime opts: DeserializeOpts,
+) DeserializeError!Inferred {
+    const peeked = try peekNext(source, opts) orelse return DeserializeError.ExpectedToken;
+
+    return .{
+        .token_type = Tokenizer.inferrTokenType(peeked) orelse return DeserializeError.InvalidToken,
+        .peeked = peeked,
+    };
 }
 
 pub fn nextToken(
