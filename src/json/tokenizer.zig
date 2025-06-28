@@ -98,10 +98,10 @@ pub inline fn peekChar(
 }
 
 inline fn consumeLiteral(
-    self: Tokenizer,
+    self: *Tokenizer,
     literal: []const u8,
 ) ParseError!void {
-    const equals = (self.remaining() >= literal.len) and (std.mem.eql(u8, self[0..literal.len], literal));
+    const equals = (self.remaining() >= literal.len) and (std.mem.eql(u8, self.source[self.i .. self.i + literal.len], literal));
 
     if (!equals) {
         return ParseError.InvalidToken;

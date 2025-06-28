@@ -10,8 +10,11 @@ const TokenTypePrimitive = Tokenizer.TokenTypePrimitive;
 
 pub const DeserializeError = error{
     ExpectedBool,
+    ExpectedOptionalBool,
     ExpectedNumber,
+    ExpectedOptionalNumber,
     ExpectedString,
+    ExpectedOptionalString,
     ExpectedField,
     ExpectedObject,
     ExpectedArray,
@@ -35,7 +38,7 @@ pub const DeserializeOpts = struct {
 pub inline fn tokenFitsType(
     comptime T: type,
     token_type: TokenTypePrimitive,
-    opts: DeserializeOpts,
+    comptime opts: DeserializeOpts,
 ) bool {
     _ = opts;
 
