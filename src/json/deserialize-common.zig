@@ -209,7 +209,7 @@ pub inline fn peekNext(
     }
 }
 
-pub inline fn inferrNextDiscard(
+pub inline fn peekNextTokenTypeDiscard(
     source: *Tokenizer,
     comptime opts: DeserializeOpts,
 ) DeserializeError!TokenTypePrimitive {
@@ -223,7 +223,7 @@ pub const Inferred = struct {
     peeked: u8,
 };
 
-pub inline fn inferrNext(
+pub inline fn peekNextTokenType(
     source: *Tokenizer,
     comptime opts: DeserializeOpts,
 ) DeserializeError!Inferred {
