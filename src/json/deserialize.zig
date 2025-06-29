@@ -268,7 +268,7 @@ inline fn deserializeOptionalFloat(
 // --------------------------------------------------
 // deserializeString
 
-inline fn deserializeStringPeeked(
+inline fn deserializeStringInferred(
     source: *Tokenizer,
     comptime token_type: TokenTypePrimitive,
 ) DeserializeError![]const u8 {
@@ -287,13 +287,13 @@ inline fn deserializeString(
     comptime opts: DeserializeOpts,
 ) DeserializeError![]const u8 {
     if (opts.precice_errors) {
-        return deserializeStringPeeked(source, common.peekNextTokenTypeDiscard(source, opts));
+        return deserializeStringInferred(source, common.peekNextTokenTypeDiscard(source, opts));
     } else {
         return common.nextTokenExpect(source, .string, opts);
     }
 }
 
-inline fn deserializeOptionalStringPeeked(
+inline fn deserializeOptionalStringInferred(
     source: *Tokenizer,
     comptime token_type: TokenTypePrimitive,
 ) DeserializeError![]const u8 {
@@ -316,7 +316,7 @@ inline fn deserializeOptionalString(
     comptime opts: DeserializeOpts,
 ) DeserializeOpts!?[]const u8 {
     if (opts.precice_errors) {
-        return deserializeOptionalStringPeeked(source, common.peekNextTokenTypeDiscard(source, opts));
+        return deserializeOptionalStringInferred(source, common.peekNextTokenTypeDiscard(source, opts));
     } else {
         return common.nextTokenExpectNullable(source, .string, opts);
     }
@@ -331,6 +331,7 @@ inline fn deserializeOptionalString(
 inline fn deserializePointerInferred(
     comptime T: type,
     source: *Tokenizer,
+    comptime id_token_type: TokenTypePrimitive,
 ) DeserializeError!T {
     common.expectPointer(T);
 
@@ -339,7 +340,7 @@ inline fn deserializePointerInferred(
     switch (info.size) {
         .slice => {
             if (comptime std.mem.eql(u8, @typeName(T), @typeName([]const u8))) {
-                return deserializeStringPeeked(source);
+                return deserializeStringInferred(source, id_token_type);
             }
 
             @compileError("Slices (exept strings ([]const u8)) are not allowed while parsing unallocated! Consider using deserializeAlloc().");
@@ -376,6 +377,7 @@ inline fn deserializePointer(
 inline fn deserializeOptionalPointerInferred(
     comptime T: type,
     source: *Tokenizer,
+    comptime id_token_type: TokenTypePrimitive,
 ) DeserializeError!T {
     common.expectPointer(T);
 
@@ -384,7 +386,7 @@ inline fn deserializeOptionalPointerInferred(
     switch (info.size) {
         .slice => {
             if (comptime std.mem.eql(u8, @typeName(T), @typeName([]const u8))) {
-                return deserializeOptionalStringPeeked(source);
+                return deserializeOptionalStringInferred(source, id_token_type);
             }
 
             @compileError("Slices (exept strings ([]const u8)) are not allowed while parsing unallocated! Consider using deserializeAlloc().");
@@ -425,27 +427,36 @@ inline fn deserializeOptionalPointer(
 // deserializeArray
 
 inline fn deserializeArrayItem(
-    comptime T: type,
-    item: *T,
+    comptime Array: type,
+    dest: anytype,
     source: *Tokenizer,
     comptime opts: DeserializeOpts,
 ) DeserializeError!void {
+    {
+        common.expectPointer(@TypeOf(dest));
+        common.expectArray(Array);
+    }
+
     if (opts.precice_errors) {
         const peeked = try common.peekNext(source, opts) orelse return DeserializeError.ExpectedToken;
 
         switch (Tokenizer.inferrTokenType(peeked) orelse return DeserializeError.InvalidToken) {
             .comma => {
+                if (common.arrayLenght(Array) == 1) {
+                    return DeserializeError.UnexpectedToken;
+                }
+
                 return DeserializeError.MissingArrayItem;
             },
             .array_end => {
                 return DeserializeError.ArrayTooShort;
             },
             inline else => |token_type| {
-                try deserializeInnerInferred(T, item, source, peeked, token_type, opts);
+                try deserializeInnerInferred(std.meta.Child(Array), dest, source, peeked, token_type, opts);
             },
         }
     } else {
-        try deserializeInner(T, item, source, opts);
+        try deserializeInner(std.meta.Child(Array), dest, source, opts);
     }
 }
 
@@ -500,15 +511,15 @@ inline fn consumeArraySeperator(
     }
 }
 
-inline fn deserializeEmptyArrayPeeked(
-    comptime T: type,
+inline fn consumeEmptyArrayAssume(
+    comptime Array: type,
     source: *Tokenizer,
     comptime opts: DeserializeOpts,
 ) DeserializeError!void {
-    { // inspect passed type
-        common.expectArray(T);
+    {
+        common.expectArray(Array);
 
-        if (common.arrayLenght(T) > 0) {
+        if (common.arrayLenght(Array) > 0) {
             @compileError("Expected array with lenght 0!");
         }
     }
@@ -516,12 +527,15 @@ inline fn deserializeEmptyArrayPeeked(
     if (opts.precice_errors) {
         switch (try common.peekNextTokenTypeDiscard(source, opts)) {
             .array_end => {},
+            .comma => {
+                return DeserializeError.UnexpectedToken;
+            },
             inline else => |token_type| {
-                if (common.tokenFitsType(std.meta.Child(T), token_type, opts)) {
+                if (common.tokenFitsType(std.meta.Child(Array), token_type, opts)) {
                     return DeserializeError.ArrayTooLong;
                 }
 
-                return common.expectedError(std.meta.Child(T));
+                return common.expectedError(std.meta.Child(Array));
             },
         }
     } else {
@@ -529,15 +543,46 @@ inline fn deserializeEmptyArrayPeeked(
     }
 }
 
-inline fn deserializeEmptyArray(
-    comptime T: type,
+inline fn consumeEmptyArrayInferred(
+    comptime Array: type,
+    source: *Tokenizer,
+    comptime id_token_type: TokenTypePrimitive,
+    comptime opts: DeserializeOpts,
+) DeserializeError!void {
+    {
+        common.expectArray(Array);
+
+        if (common.arrayLenght(Array) > 0) {
+            @compileError("Expected array with lenght 0!");
+        }
+    }
+
+    switch (id_token_type) {
+        .array_end => {},
+        .comma => {
+            return DeserializeError.UnexpectedToken;
+        },
+        inline else => |token_type| {
+            if (common.tokenFitsType(std.meta.Child(Array), token_type, opts)) {
+                return DeserializeError.ArrayTooLong;
+            }
+
+            return common.expectedError(std.meta.Child(Array));
+        },
+    }
+
+    return consumeEmptyArrayAssume(Array, source, id_token_type, opts);
+}
+
+inline fn consumeEmptyArray(
+    comptime Array: type,
     source: *Tokenizer,
     comptime opts: DeserializeOpts,
 ) DeserializeError!void {
-    { // inspect passed type
-        common.expectArray(T);
+    {
+        common.expectArray(Array);
 
-        if (common.arrayLenght(T) > 0) {
+        if (common.arrayLenght(Array) > 0) {
             @compileError("Expected array with lenght 0!");
         }
     }
@@ -553,46 +598,135 @@ inline fn deserializeEmptyArray(
         try common.nextTokenExpect(source, .array_begin, opts);
     }
 
-    return deserializeEmptyArrayPeeked(T, source, opts);
+    return consumeEmptyArrayAssume(Array, source, opts);
 }
 
-fn deserializeArrayInferred(
-    comptime T: type,
-    array: *T,
+inline fn deserializeOptionalEmptyArrayInferred(
+    comptime Array: type,
+    dest: anytype,
+    source: *Tokenizer,
+    comptime id_token_type: TokenTypePrimitive,
+    comptime opts: DeserializeOpts,
+) DeserializeError!void {
+    {
+        common.expectPointer(@TypeOf(dest));
+        common.expectArray(Array);
+
+        if (common.arrayLenght(Array) > 0) {
+            @compileError("Expected array with lenght 0!");
+        }
+    }
+
+    switch (id_token_type) {
+        .array_begin => {},
+        .null => {
+            dest.* = null;
+            return source.consumeNullAssume();
+        },
+        else => {
+            return DeserializeError.ExpectedOptionalArray;
+        },
+    }
+
+    return consumeEmptyArrayAssume(Array, source, opts);
+}
+
+inline fn deserializeOptionalEmptyArray(
+    comptime Array: type,
+    dest: anytype,
     source: *Tokenizer,
     comptime opts: DeserializeOpts,
 ) DeserializeError!void {
-    { // inspect passed type
-        common.expectArray(T);
+    {
+        common.expectPointer(@TypeOf(dest));
+        common.expectArray(Array);
 
-        if (common.arrayLenght(T) == 0) {
-            return deserializeEmptyArrayPeeked(T, source, opts);
+        if (common.arrayLenght(Array) > 0) {
+            @compileError("Expected array with lenght 0!");
+        }
+    }
+
+    switch (try common.peekNextTokenTypeDiscard(source, opts)) {
+        .array_begin => {},
+        .null => {
+            dest.* = null;
+            return source.consumeNullAssume();
+        },
+        else => {
+            return DeserializeError.ExpectedOptionalArray;
+        },
+    }
+
+    return consumeEmptyArrayAssume(Array, source, opts);
+}
+
+fn deserializeArrayAssume(
+    comptime Array: type,
+    dest: anytype,
+    source: *Tokenizer,
+    comptime opts: DeserializeOpts,
+) DeserializeError!void {
+    {
+        common.expectPointer(@TypeOf(dest));
+        common.expectArray(Array);
+
+        if (common.arrayLenght(Array) == 0) {
+            return consumeEmptyArrayAssume(Array, source, opts);
         }
     }
 
     {
-        for (0..common.arrayLenght(T) - 1) |i| {
-            try deserializeArrayItem(std.meta.Child(T), &array[i], source, opts);
+        for (0..common.arrayLenght(Array) - 1) |i| {
+            try deserializeArrayItem(Array, &dest.*[i], source, opts);
 
             try consumeArraySeperator(source, opts);
         }
 
-        try deserializeArrayItem(std.meta.Child(T), &array[common.arrayLenght(T) - 1], source, opts);
+        try deserializeArrayItem(Array, &dest.*[common.arrayLenght(Array) - 1], source, opts);
     }
 
     try consumeArrayTerminator(source, opts);
 }
 
+inline fn deserializeArrayInferred(
+    comptime Array: type,
+    dest: anytype,
+    source: *Tokenizer,
+    comptime id_token_type: TokenTypePrimitive,
+    comptime opts: DeserializeOpts,
+) DeserializeError!void {
+    {
+        common.expectPointer(@TypeOf(dest));
+        common.expectArray(Array);
+
+        if (common.arrayLenght(Array) == 0) {
+            return consumeEmptyArray(Array, source, opts);
+        }
+    }
+
+    switch (id_token_type) {
+        .array_begin => {
+            return deserializeArrayAssume(Array, dest, source, opts);
+        },
+        else => {
+            return DeserializeError.ExpectedArray;
+        },
+    }
+}
+
 inline fn deserializeArray(
-    comptime T: type,
-    array: *T,
+    comptime Array: type,
+    dest: anytype,
     source: *Tokenizer,
     comptime opts: DeserializeOpts,
 ) DeserializeError!void {
-    common.expectArray(T);
+    {
+        common.expectPointer(@TypeOf(dest));
+        common.expectArray(Array);
 
-    if (common.arrayLenght(T) == 0) {
-        return deserializeEmptyArray(T, source, opts);
+        if (common.arrayLenght(Array) == 0) {
+            return consumeEmptyArray(Array, source, opts);
+        }
     }
 
     if (opts.precice_errors) {
@@ -606,7 +740,94 @@ inline fn deserializeArray(
         try common.nextTokenExpect(source, .array_begin, opts);
     }
 
-    return deserializeArrayInferred(T, array, source, opts);
+    return deserializeArrayAssume(Array, dest, source, opts);
+}
+
+fn deserializeOptionalArrayAssume(
+    comptime Array: type,
+    dest: anytype,
+    source: *Tokenizer,
+    comptime opts: DeserializeOpts,
+) DeserializeError!void {
+    {
+        common.expectPointer(@TypeOf(dest));
+        common.expectArray(Array);
+
+        if (common.arrayLenght(Array) == 0) {
+            return consumeEmptyArrayAssume(Array, source, opts);
+        }
+    }
+
+    {
+        for (0..common.arrayLenght(Array) - 1) |i| {
+            try deserializeArrayItem(Array, &dest.*.?[i], source, opts);
+
+            try consumeArraySeperator(source, opts);
+        }
+
+        try deserializeArrayItem(Array, &dest.*.?[common.arrayLenght(Array) - 1], source, opts);
+    }
+
+    try consumeArrayTerminator(source, opts);
+}
+
+inline fn deserializeOptionalArrayInferred(
+    comptime Array: type,
+    dest: anytype,
+    source: *Tokenizer,
+    comptime id_token_type: TokenTypePrimitive,
+    comptime opts: DeserializeOpts,
+) DeserializeError!void {
+    {
+        common.expectPointer(@TypeOf(dest));
+        common.expectArray(Array);
+
+        if (common.arrayLenght(Array) == 0) {
+            return deserializeOptionalEmptyArrayInferred(Array, dest, source, id_token_type, opts);
+        }
+    }
+
+    switch (id_token_type) {
+        .array_begin => {},
+        .null => {
+            dest.* = null;
+            return source.consumeNullAssume();
+        },
+        else => {
+            return DeserializeError.ExpectedArray;
+        },
+    }
+
+    return deserializeOptionalArrayAssume(Array, dest, source, opts);
+}
+
+inline fn deserializeOptionalArray(
+    comptime Array: type,
+    dest: anytype,
+    source: *Tokenizer,
+    comptime opts: DeserializeOpts,
+) DeserializeError!void {
+    {
+        common.expectPointer(@TypeOf(dest));
+        common.expectArray(Array);
+
+        if (common.arrayLenght(Array) == 0) {
+            return deserializeOptionalEmptyArray(Array, dest, source, opts);
+        }
+    }
+
+    switch (try common.peekNextTokenTypeDiscard(source, opts)) {
+        .array_begin => {},
+        .null => {
+            dest.* = null;
+            return source.consumeNullAssume();
+        },
+        else => {
+            return DeserializeError.ExpectedArray;
+        },
+    }
+
+    return deserializeOptionalArrayAssume(Array, dest, source, opts);
 }
 
 // deserializeArray
@@ -815,6 +1036,9 @@ fn deserializeOptional(
         .pointer => {
             dest.* = try deserializeOptionalPointer(T, source, opts);
         },
+        .array => {
+            try deserializeOptionalArray(T, dest, source, opts);
+        },
         .optional => {
             try deserializeOptional(std.meta.Child(T), dest, source, opts);
         },
@@ -847,6 +1071,9 @@ fn deserializeOptionalInferred(
         .pointer => {
             dest.* = try deserializeOptionalPointerInferred(source, token_type);
         },
+        .array => {
+            try deserializeOptionalArrayInferred(T, dest, source, token_type, opts);
+        },
         .optional => {
             try deserializeOptionalInferred(T, dest, source, peeked, token_type, opts);
         },
@@ -877,10 +1104,10 @@ pub fn deserializeInnerInferred(
             field.* = try deserializeFloatInferred(T, source, peeked, token_type);
         },
         .pointer => {
-            field.* = try deserializePointerInferred(T, source);
+            field.* = try deserializePointerInferred(T, source, token_type);
         },
         .array => {
-            try deserializeArrayInferred(T, field, source, opts);
+            try deserializeArrayInferred(T, field, source, token_type, opts);
         },
         .@"struct" => {
             try deserialzeStructInferred(T, field, source, opts);
@@ -958,6 +1185,13 @@ pub fn deserialzeFromSource(
 
             return dest;
         },
+        .optional => {
+            var dest: T = undefined;
+
+            try deserializeOptional(T, &dest, source, opts);
+
+            return dest;
+        },
         else => {
             @compileError("Unimplemented type!");
         },
@@ -968,7 +1202,7 @@ pub fn deserialize(
     comptime T: type,
     json: []const u8,
     comptime opts: DeserializeOpts,
-) !T {
+) DeserializeError!T {
     var source = Tokenizer{ .source = json };
 
     return deserialzeFromSource(T, &source, opts);
