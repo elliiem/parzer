@@ -133,7 +133,7 @@ pub fn expectBoolean(comptime T: type) void {
     switch (@typeInfo(T)) {
         .bool => {},
         else => {
-            @compileError("Expected T to be an array!");
+            @compileError("Expected T to be a boolean!");
         },
     }
 }
@@ -142,7 +142,7 @@ pub fn expectInt(comptime T: type) void {
     switch (@typeInfo(T)) {
         .int, .comptime_int => {},
         else => {
-            @compileError("Expected T to be an array!");
+            @compileError("Expected T to be a integer!");
         },
     }
 }
@@ -151,7 +151,7 @@ pub fn expectFloat(comptime T: type) void {
     switch (@typeInfo(T)) {
         .float, .comptime_float => {},
         else => {
-            @compileError("Expected T to be an array!");
+            @compileError("Expected T to be a float!");
         },
     }
 }
@@ -160,7 +160,7 @@ pub fn expectPointer(comptime T: type) void {
     switch (@typeInfo(T)) {
         .pointer => {},
         else => {
-            @compileError("Expected T to be an array!");
+            @compileError("Expected T to be a pointer!");
         },
     }
 }
@@ -169,7 +169,22 @@ pub fn expectArray(comptime T: type) void {
     switch (@typeInfo(T)) {
         .array => {},
         else => {
-            @compileError("Expected T to be an array!");
+            @compileError("Expected T to be a array!");
+        },
+    }
+}
+
+pub fn expectString(comptime T: type) void {
+    if (!(T == []const u8)) {
+        @compileError("Expected T to be a array!");
+    }
+}
+
+pub fn expectOptional(comptime T: type) void {
+    switch (@typeInfo(T)) {
+        .optional => {},
+        else => {
+            @compileError("Expected T to be a optional!");
         },
     }
 }
@@ -178,8 +193,92 @@ pub fn expectStruct(comptime T: type) void {
     switch (@typeInfo(T)) {
         .@"struct" => {},
         else => {
-            @compileError("Expected T to be an array!");
+            @compileError("Expected T to be a struct!");
         },
+    }
+}
+
+pub inline fn checkTypesBoolean(
+    comptime Dest: type,
+) void {
+    comptime {
+        expectPointer(Dest);
+
+        var Value = std.meta.Child(Dest);
+        while (@typeInfo(Value) == .optional) {
+            Value = std.meta.Child(Value);
+        }
+
+        expectBoolean(Value);
+    }
+}
+
+pub inline fn checkTypesInteger(
+    comptime Int: type,
+    comptime Dest: type,
+) void {
+    expectInt(Int);
+
+    comptime {
+        expectPointer(Dest);
+
+        var Value = std.meta.Child(Dest);
+        while (@typeInfo(Value) == .optional) {
+            Value = std.meta.Child(Value);
+        }
+
+        expectInt(Value);
+    }
+}
+
+pub inline fn checkTypesFloat(
+    comptime Float: type,
+    comptime Dest: type,
+) void {
+    expectInt(Float);
+
+    comptime {
+        expectPointer(Dest);
+
+        var Value = std.meta.Child(Dest);
+        while (@typeInfo(Value) == .optional) {
+            Value = std.meta.Child(Value);
+        }
+
+        expectFloat(Value);
+    }
+}
+
+pub inline fn checkTypesString(
+    comptime Dest: type,
+) void {
+    expectPointer(Dest);
+
+    comptime {
+        var Value = std.meta.Child(Dest);
+        while (@typeInfo(Value) == .optional) {
+            Value = std.meta.Child(Value);
+        }
+
+        expectString(Value);
+    }
+}
+
+pub inline fn checkTypesPointer(
+    comptime Pointer: type,
+    comptime Dest: type,
+) void {
+    expectPointer(Pointer);
+
+    comptime {
+        expectPointer(Dest);
+
+        var Value = std.meta.Child(Dest);
+        while (@typeInfo(Value) == .optional) {
+            Value = std.meta.Child(Value);
+        }
+
+        expectPointer(Value);
     }
 }
 
@@ -222,18 +321,18 @@ pub inline fn peekNextTokenTypeDiscard(
 
 pub const Inferred = struct {
     token_type: TokenTypePrimitive,
-    peeked: u8,
+    ch: u8,
 };
 
 pub inline fn peekNextTokenType(
     source: *Tokenizer,
     comptime opts: DeserializeOpts,
 ) DeserializeError!Inferred {
-    const peeked = try peekNext(source, opts) orelse return DeserializeError.ExpectedToken;
+    const ch = try peekNext(source, opts) orelse return DeserializeError.ExpectedToken;
 
     return .{
-        .token_type = Tokenizer.inferrTokenType(peeked) orelse return DeserializeError.InvalidToken,
-        .peeked = peeked,
+        .token_type = Tokenizer.inferrTokenType(ch) orelse return DeserializeError.InvalidToken,
+        .ch = ch,
     };
 }
 
