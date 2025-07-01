@@ -37,98 +37,6 @@ pub const DeserializeOpts = struct {
     precice_errors: bool = builtin.mode == .Debug,
 };
 
-pub inline fn tokenFitsType(
-    comptime T: type,
-    token_type: TokenTypePrimitive,
-    comptime opts: DeserializeOpts,
-) bool {
-    _ = opts;
-
-    switch (@typeInfo(T)) {
-        .bool => {
-            return token_type == .true or token_type == .false;
-        },
-        .int, .comptime_int, .float, .comptime_float => {
-            return token_type == .number;
-        },
-        .pointer => |info| {
-            switch (info.size) {
-                .slice => {
-                    if (comptime std.mem.eql(@typeName(std.meta.Child(T)), @typeName([]const u8))) {
-                        return token_type == .string;
-                    }
-
-                    return token_type == .array_begin;
-                },
-                else => {
-                    return tokenFitsType(std.meta.Child(T), token_type);
-                },
-            }
-        },
-        .array => {
-            return token_type == .array_begin;
-        },
-        .@"struct" => {
-            return token_type == .object_begin;
-        },
-        .optional => {
-            return tokenFitsType(std.meta.Child(T), token_type) or token_type == .null;
-        },
-        .@"enum" => {
-            @compileError("Unimplemented type!");
-        },
-        .@"union" => {
-            @compileError("Unimplemented type!");
-        },
-        else => {
-            @compileError("Invalid type!");
-        },
-    }
-}
-
-pub fn typeNameEql(
-    comptime A: type,
-    comptime B: type,
-) bool {
-    return comptime std.mem.eql(@typeName(A), @typeName(B));
-}
-
-pub fn expectedError(
-    comptime T: type,
-) DeserializeError {
-    switch (@typeInfo(T)) {
-        .bool => {
-            return DeserializeError.ExpectedBool;
-        },
-        .int, .comptime_int, .float, .comptime_float => {
-            return DeserializeError.ExpectedNumber;
-        },
-        .pointer => |info| {
-            switch (info.size) {
-                .slice => {
-                    if (typeNameEql(std.meta.Child(T), []const u8)) {
-                        return DeserializeError.ExpectedString;
-                    }
-
-                    return DeserializeError.ExpectedArray;
-                },
-                else => {
-                    return expectedError(std.meta.Child(T));
-                },
-            }
-        },
-        .array => {
-            return DeserializeError.ExpectedArray;
-        },
-        .@"struct" => {
-            return DeserializeError.ExpectedObject;
-        },
-        else => {
-            @compileError("Unimplemented type!");
-        },
-    }
-}
-
 pub fn expectBoolean(comptime T: type) void {
     switch (@typeInfo(T)) {
         .bool => {},
@@ -198,94 +106,91 @@ pub fn expectStruct(comptime T: type) void {
     }
 }
 
-pub inline fn checkTypesBoolean(
-    comptime Dest: type,
-) void {
-    comptime {
-        expectPointer(Dest);
-
-        var Value = std.meta.Child(Dest);
-        while (@typeInfo(Value) == .optional) {
-            Value = std.meta.Child(Value);
-        }
-
-        expectBoolean(Value);
-    }
-}
-
-pub inline fn checkTypesInteger(
-    comptime Int: type,
-    comptime Dest: type,
-) void {
-    expectInt(Int);
-
-    comptime {
-        expectPointer(Dest);
-
-        var Value = std.meta.Child(Dest);
-        while (@typeInfo(Value) == .optional) {
-            Value = std.meta.Child(Value);
-        }
-
-        expectInt(Value);
-    }
-}
-
-pub inline fn checkTypesFloat(
-    comptime Float: type,
-    comptime Dest: type,
-) void {
-    expectInt(Float);
-
-    comptime {
-        expectPointer(Dest);
-
-        var Value = std.meta.Child(Dest);
-        while (@typeInfo(Value) == .optional) {
-            Value = std.meta.Child(Value);
-        }
-
-        expectFloat(Value);
-    }
-}
-
-pub inline fn checkTypesString(
-    comptime Dest: type,
-) void {
-    expectPointer(Dest);
-
-    comptime {
-        var Value = std.meta.Child(Dest);
-        while (@typeInfo(Value) == .optional) {
-            Value = std.meta.Child(Value);
-        }
-
-        expectString(Value);
-    }
-}
-
-pub inline fn checkTypesPointer(
-    comptime Pointer: type,
-    comptime Dest: type,
-) void {
-    expectPointer(Pointer);
-
-    comptime {
-        expectPointer(Dest);
-
-        var Value = std.meta.Child(Dest);
-        while (@typeInfo(Value) == .optional) {
-            Value = std.meta.Child(Value);
-        }
-
-        expectPointer(Value);
-    }
-}
-
 pub fn arrayLenght(comptime T: type) comptime_int {
     expectArray(T);
 
     return @typeInfo(T).array.len;
+}
+
+pub inline fn createUndefined(
+    comptime T: type,
+) T {
+    comptime {
+        switch (@typeInfo(T)) {
+            .bool, .int, .comptime_int, .float, .comptime_float, .pointer => {
+                return undefined;
+            },
+            .array => {
+                const Item = std.meta.Child(T);
+
+                return [1]Item{createUndefined(Item)} ** arrayLenght(T);
+            },
+            .@"struct" => |info| {
+                var value: T = undefined;
+
+                for (info.fields) |field| {
+                    @field(value, field.name) = createUndefined(field.type);
+                }
+
+                return value;
+            },
+            .optional => {
+                return createUndefined(std.meta.Child(T));
+            },
+            else => {
+                @compileError("Unimplemented type!");
+            },
+        }
+    }
+}
+
+pub inline fn tokenFitsType(
+    comptime T: type,
+    token_type: TokenTypePrimitive,
+    comptime opts: DeserializeOpts,
+) bool {
+    _ = opts;
+
+    switch (@typeInfo(T)) {
+        .bool => {
+            return token_type == .true or token_type == .false;
+        },
+        .int, .comptime_int, .float, .comptime_float => {
+            return token_type == .number;
+        },
+        .pointer => |info| {
+            switch (info.size) {
+                .slice => {
+                    if (comptime std.mem.eql(@typeName(std.meta.Child(T)), @typeName([]const u8))) {
+                        return token_type == .string;
+                    }
+
+                    return token_type == .array_begin;
+                },
+                else => {
+                    return tokenFitsType(std.meta.Child(T), token_type);
+                },
+            }
+        },
+        .array => {
+            return token_type == .array_begin;
+        },
+        .@"struct" => {
+            return token_type == .object_begin;
+        },
+        .optional => {
+            return tokenFitsType(std.meta.Child(T), token_type) or token_type == .null;
+        },
+        .@"enum" => {
+            @compileError("Unimplemented type!");
+        },
+        .@"union" => {
+            @compileError("Unimplemented type!");
+        },
+        else => {
+            @compileError("Invalid type!");
+        },
+    }
 }
 
 pub inline fn peekNext(
@@ -308,32 +213,6 @@ pub inline fn peekNext(
             return source.takeChar();
         }
     }
-}
-
-pub inline fn peekNextTokenTypeDiscard(
-    source: *Tokenizer,
-    comptime opts: DeserializeOpts,
-) DeserializeError!TokenTypePrimitive {
-    const peek = try peekNext(source, opts) orelse return DeserializeError.ExpectedToken;
-
-    return Tokenizer.inferrTokenType(peek) orelse return DeserializeError.InvalidToken;
-}
-
-pub const Inferred = struct {
-    token_type: TokenTypePrimitive,
-    ch: u8,
-};
-
-pub inline fn peekNextTokenType(
-    source: *Tokenizer,
-    comptime opts: DeserializeOpts,
-) DeserializeError!Inferred {
-    const ch = try peekNext(source, opts) orelse return DeserializeError.ExpectedToken;
-
-    return .{
-        .token_type = Tokenizer.inferrTokenType(ch) orelse return DeserializeError.InvalidToken,
-        .ch = ch,
-    };
 }
 
 pub fn nextToken(
@@ -369,4 +248,30 @@ pub fn nextTokenExpectNullable(
     } else {
         return source.takeTokenExpectNullable(expected);
     }
+}
+
+pub const Inferred = struct {
+    token_type: TokenTypePrimitive,
+    ch: u8,
+};
+
+pub inline fn peekNextTokenType(
+    source: *Tokenizer,
+    comptime opts: DeserializeOpts,
+) DeserializeError!Inferred {
+    const ch = try peekNext(source, opts) orelse return DeserializeError.ExpectedToken;
+
+    return .{
+        .token_type = Tokenizer.inferrTokenType(ch) orelse return DeserializeError.InvalidToken,
+        .ch = ch,
+    };
+}
+
+pub inline fn peekNextTokenTypeDiscard(
+    source: *Tokenizer,
+    comptime opts: DeserializeOpts,
+) DeserializeError!TokenTypePrimitive {
+    const peek = try peekNext(source, opts) orelse return DeserializeError.ExpectedToken;
+
+    return Tokenizer.inferrTokenType(peek) orelse return DeserializeError.InvalidToken;
 }
