@@ -20,6 +20,12 @@ pub const DeserializeError = error{
     ExpectedOptionalObject,
     ExpectedArray,
     ExpectedOptionalArray,
+    ExpectedEnum,
+    ExpectedOptionalEnum,
+    ExpectedUnion,
+    ExpectedOptionalUnion,
+    ExpectedTag,
+    UnknownTag,
     ArrayTooShort,
     ArrayTooLong,
     TrailingComma,
@@ -31,13 +37,25 @@ pub const DeserializeError = error{
     IllegalWhitespace,
 } || Tokenizer.ParseError;
 
+pub const UnionRepresentation = enum {
+    externally_tagged,
+    internally_tagged,
+    adjacently_tagged,
+    untagged,
+};
+
 pub const DeserializeOpts = struct {
     allow_trailing_comma: bool = true,
     whitespace: bool = true,
     precice_errors: bool = builtin.mode == .Debug,
+    // TODO: move this into the type itself to allow multiple types unions to
+    // be parsed.
+    union_representation: UnionRepresentation = .externally_tagged,
 };
 
-pub fn expectBoolean(comptime T: type) void {
+pub fn expectBoolean(
+    comptime T: type,
+) void {
     switch (@typeInfo(T)) {
         .bool => {},
         else => {
@@ -46,7 +64,9 @@ pub fn expectBoolean(comptime T: type) void {
     }
 }
 
-pub fn expectInt(comptime T: type) void {
+pub fn expectInt(
+    comptime T: type,
+) void {
     switch (@typeInfo(T)) {
         .int, .comptime_int => {},
         else => {
@@ -55,7 +75,9 @@ pub fn expectInt(comptime T: type) void {
     }
 }
 
-pub fn expectFloat(comptime T: type) void {
+pub fn expectFloat(
+    comptime T: type,
+) void {
     switch (@typeInfo(T)) {
         .float, .comptime_float => {},
         else => {
@@ -64,7 +86,9 @@ pub fn expectFloat(comptime T: type) void {
     }
 }
 
-pub fn expectPointer(comptime T: type) void {
+pub fn expectPointer(
+    comptime T: type,
+) void {
     switch (@typeInfo(T)) {
         .pointer => {},
         else => {
@@ -73,7 +97,9 @@ pub fn expectPointer(comptime T: type) void {
     }
 }
 
-pub fn expectArray(comptime T: type) void {
+pub fn expectArray(
+    comptime T: type,
+) void {
     switch (@typeInfo(T)) {
         .array => {},
         else => {
@@ -82,13 +108,17 @@ pub fn expectArray(comptime T: type) void {
     }
 }
 
-pub fn expectString(comptime T: type) void {
+pub fn expectString(
+    comptime T: type,
+) void {
     if (!(T == []const u8)) {
         @compileError("Expected T to be a array!");
     }
 }
 
-pub fn expectOptional(comptime T: type) void {
+pub fn expectOptional(
+    comptime T: type,
+) void {
     switch (@typeInfo(T)) {
         .optional => {},
         else => {
@@ -97,12 +127,102 @@ pub fn expectOptional(comptime T: type) void {
     }
 }
 
-pub fn expectStruct(comptime T: type) void {
+pub fn expectStruct(
+    comptime T: type,
+) void {
     switch (@typeInfo(T)) {
         .@"struct" => {},
         else => {
             @compileError("Expected T to be a struct!");
         },
+    }
+}
+
+pub fn expectEnum(
+    comptime T: type,
+) void {
+    switch (@typeInfo(T)) {
+        .@"enum" => {},
+        else => {
+            @compileError("Expected T to be a enum!");
+        },
+    }
+}
+
+pub fn expectUnion(
+    comptime T: type,
+) void {
+    switch (@typeInfo(T)) {
+        .@"union" => {},
+        else => {
+            @compileError("Expected T to be a enum!");
+        },
+    }
+}
+
+pub fn unionValueTags(
+    comptime T: type,
+) type {
+    comptime {
+        expectUnion(T);
+
+        const union_fields = @typeInfo(T).@"union".fields;
+
+        var tags: [union_fields.len]std.builtin.Type.EnumField = undefined;
+        var tag_i = 0;
+
+        for (union_fields) |field| {
+            if (field.type != void) {
+                tags[tag_i] = .{
+                    .name = field.name,
+                    .value = tag_i,
+                };
+
+                tag_i += 1;
+            }
+        }
+
+        return @Type(.{
+            .@"enum" = .{
+                .tag_type = std.math.IntFittingRange(0, tag_i),
+                .fields = tags[0..tag_i],
+                .decls = &[_]std.builtin.Type.Declaration{},
+                .is_exhaustive = true,
+            },
+        });
+    }
+}
+
+pub fn unionVoidTags(
+    comptime T: type,
+) type {
+    comptime {
+        expectUnion(T);
+
+        const union_fields = @typeInfo(T).@"union".fields;
+
+        var tags: [union_fields.len]std.builtin.Type.EnumField = undefined;
+        var tag_i = 0;
+
+        for (union_fields) |field| {
+            if (field.type != void) {
+                tags[tag_i] = .{
+                    .name = field.name,
+                    .value = tag_i,
+                };
+
+                tag_i += 1;
+            }
+        }
+
+        return @Type(.{
+            .@"enum" = .{
+                .tag_type = std.math.IntFittingRange(0, tag_i),
+                .fields = tags[0..tag_i],
+                .decls = &[0]std.builtin.Type.Declaration{},
+                .is_exhaustive = true,
+            },
+        });
     }
 }
 
@@ -117,7 +237,15 @@ pub inline fn createUndefined(
 ) T {
     comptime {
         switch (@typeInfo(T)) {
-            .bool, .int, .comptime_int, .float, .comptime_float, .pointer => {
+            .bool,
+            .int,
+            .comptime_int,
+            .float,
+            .comptime_float,
+            .pointer,
+            .@"enum",
+            .@"union",
+            => {
                 return undefined;
             },
             .array => {
@@ -182,13 +310,10 @@ pub inline fn tokenFitsType(
             return tokenFitsType(std.meta.Child(T), token_type) or token_type == .null;
         },
         .@"enum" => {
-            @compileError("Unimplemented type!");
-        },
-        .@"union" => {
-            @compileError("Unimplemented type!");
+            return token_type == .string;
         },
         else => {
-            @compileError("Invalid type!");
+            @compileError("Unimplemented type!");
         },
     }
 }

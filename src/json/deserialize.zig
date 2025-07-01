@@ -1123,6 +1123,196 @@ fn deserializeOptionalStruct(
 // deserializeStruct
 // --------------------------------------------------
 
+// --------------------------------------------------
+// deserializeEnum
+
+inline fn deserializeEnumAssume(
+    comptime T: type,
+    dest: *T,
+    source: *Tokenizer,
+) DeserializeError!void {
+    common.expectEnum(T);
+
+    const tag = try source.takeStringAssume();
+
+    dest.* = std.meta.stringToEnum(T, tag) orelse DeserializeError.UnknownTag;
+}
+
+fn deserializeEnum(
+    comptime T: type,
+    dest: *T,
+    source: *Tokenizer,
+    comptime opts: DeserializeOpts,
+) DeserializeError!void {
+    common.expectEnum(T);
+
+    switch (try common.peekNextTokenTypeDiscard(source, opts)) {
+        .string => {
+            return deserializeEnumAssume(T, dest, source);
+        },
+        else => {
+            return DeserializeError.ExpectedEnum;
+        },
+    }
+}
+
+fn deserializeEnumInferred(
+    comptime T: type,
+    dest: *T,
+    source: *Tokenizer,
+    comptime id_token_type: TokenTypePrimitive,
+) DeserializeError!void {
+    common.expectEnum(T);
+
+    switch (id_token_type) {
+        .string => {
+            return deserializeEnumAssume(T, dest, source);
+        },
+        else => {
+            return DeserializeError.ExpectedEnum;
+        },
+    }
+}
+
+fn deserializeOptionalEnum(
+    comptime T: type,
+    dest: *?T,
+    source: *Tokenizer,
+    comptime opts: DeserializeOpts,
+) DeserializeError!void {
+    common.expectEnum(T);
+
+    switch (try common.peekNextTokenTypeDiscard(source, opts)) {
+        .string => {
+            return deserializeEnumAssume(T, &dest.*.?, source);
+        },
+        .null => {
+            return deserializeNullAssume(T, dest, source);
+        },
+        else => {
+            return DeserializeError.ExpectedOptionaEnum;
+        },
+    }
+}
+
+fn deserializeOptionalEnumInferred(
+    comptime T: type,
+    dest: *?T,
+    source: *Tokenizer,
+    comptime id_token_type: TokenTypePrimitive,
+) DeserializeError!void {
+    common.expectEnum(T);
+
+    switch (id_token_type) {
+        .string => {
+            return deserializeEnumAssume(T, &dest.*.?, source);
+        },
+        .null => {
+            return deserializeNullAssume(T, dest, source);
+        },
+        else => {
+            return DeserializeError.ExpectedOptionalEnum;
+        },
+    }
+}
+
+// deserializeEnum
+// --------------------------------------------------
+
+// --------------------------------------------------
+// deserializeUnion
+
+fn UnionFieldType(
+    comptime T: type,
+    tag_name: []const u8,
+) type {
+    common.expectUnion(T);
+
+    const info = @typeInfo(T).@"union";
+
+    inline for (info.fields) |field| {
+        if (std.mem.eql(u8, tag_name, field.name)) {
+            return field.type;
+        }
+    }
+
+    unreachable;
+}
+
+fn deserializeUnionInner(
+    comptime T: type,
+    dest: *T,
+    source: *Tokenizer,
+    comptime opts: DeserializeOpts,
+) DeserializeError!void {
+    common.expectUnion(T);
+
+    switch (opts.union_representation) {
+        .externally_tagged => {
+            // get the tag of the union
+            const parsed_tag_name = parse_tag: {
+                if (opts.precice_errors) {
+                    switch (try common.peekNextTokenTypeDiscard(source, opts)) {
+                        .string => {
+                            break :parse_tag try source.takeFieldAssume();
+                        },
+                        else => {
+                            return DeserializeError.ExpectedTag;
+                        },
+                    }
+                } else {
+                    break :parse_tag try common.nextTokenExpect(source, .field, opts);
+                }
+            };
+
+            { // deserialize value
+                const tags = @typeInfo(common.unionValueTags(T)).@"enum".fields;
+
+                inline for (tags) |tag| {
+                    if (std.mem.eql(u8, tag.name, parsed_tag_name)) {
+                        dest.* = @unionInit(T, tag.name, undefined);
+
+                        const FieldType = @FieldType(T, tag.name);
+                        try deserializeInner(FieldType, &@field(dest.*, tag.name), source, opts);
+
+                        break;
+                    }
+                } else {
+                    return DeserializeError.UnknownTag;
+                }
+            }
+
+            // close the union
+            return common.nextTokenExpect(source, .object_end, opts);
+        },
+        .internally_tagged => {},
+        .adjacently_tagged => {},
+        .untagged => {},
+    }
+}
+
+fn deserializeUnion(
+    comptime T: type,
+    dest: *T,
+    source: *Tokenizer,
+    comptime opts: DeserializeOpts,
+) DeserializeError!void {
+    switch (try common.peekNextTokenTypeDiscard(source, opts)) {
+        .object_begin => {
+            return deserializeUnionInner(T, dest, source, opts);
+        },
+        .string => {
+            @panic("Enum unions havent been implemented yet");
+        },
+        else => {
+            return DeserializeError.ExpectedObject;
+        },
+    }
+}
+
+// deserializeUnion
+// --------------------------------------------------
+
 fn deserializeOptional(
     comptime T: type,
     dest: *T,
@@ -1151,6 +1341,9 @@ fn deserializeOptional(
         },
         .@"struct" => {
             try deserializeOptionalStruct(Child, dest, source, opts);
+        },
+        .@"enum" => {
+            try deserializeOptionalEnum(Child, dest, source, opts);
         },
         .optional => {
             try deserializeOptional(std.meta.Child(T), &dest.*.?, source, opts);
@@ -1192,6 +1385,9 @@ fn deserializeOptionalInferred(
         .@"struct" => {
             try deserializeOptionalStructInferred(Child, dest, source, token_type, opts);
         },
+        .@"enum" => {
+            try deserializeOptionalEnumInferred(Child, dest, source, token_type);
+        },
         .optional => {
             try deserializeOptionalInferred(Child, &dest.*.?, source, peek, token_type, opts);
         },
@@ -1230,6 +1426,9 @@ pub fn deserializeInnerInferred(
         .@"struct" => {
             try deserializeStructInferred(T, dest, source, token_type, opts);
         },
+        .@"enum" => {
+            try deserializeEnumInferred(T, dest, source, token_type);
+        },
         .optional => {
             try deserializeOptionalInferred(T, dest, source, peeked, token_type, opts);
         },
@@ -1263,6 +1462,12 @@ pub fn deserializeInner(
         },
         .@"struct" => {
             try deserializeStruct(T, dest, source, opts);
+        },
+        .@"enum" => {
+            try deserializeEnum(T, dest, source, opts);
+        },
+        .@"union" => {
+            try deserializeUnion(T, dest, source, opts);
         },
         .optional => {
             try deserializeOptional(T, dest, source, opts);
