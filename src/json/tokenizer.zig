@@ -357,30 +357,6 @@ inline fn consumeNumberTrailLeadingZeroChecked(
     return self.consumeNumberTrailLeadingZero();
 }
 
-fn consumeNumber(
-    self: *Tokenizer,
-) ParseError!void {
-    self.assertFilledSource();
-
-    switch (self.peekCharAssume()) {
-        '0' => {
-            self.consumeChar();
-            return self.consumeNumberTrailLeadingZeroChecked();
-        },
-        '1'...'9' => {
-            self.consumeChar();
-            return self.consumeNumberTrail();
-        },
-        '-' => {
-            self.consumeChar();
-            return self.consumeNumberUnsignedChecked();
-        },
-        else => {
-            return ParseError.InvalidNumber;
-        },
-    }
-}
-
 pub fn takeNumber(
     self: *Tokenizer,
     ch: u8,
@@ -441,7 +417,7 @@ pub fn takeNullableNumber(
     return self.source[start..end];
 }
 
-fn consumeStringAssume(
+fn consumeStringInner(
     self: *Tokenizer,
 ) ParseError!void {
     while (!self.isSourceEmpty()) {
@@ -462,17 +438,17 @@ fn consumeString(
         return ParseError.InvalidString;
     }
 
-    return self.consumeStringAssume();
+    return self.consumeStringInner();
 }
 
-pub fn takeStringAssume(
+pub fn takeStringInner(
     self: *Tokenizer,
 ) ParseError![]const u8 {
     self.assertFilledSource();
 
     const start = self.i;
 
-    try self.consumeStringAssume();
+    try self.consumeStringInner();
 
     const end = self.i - 1;
 
@@ -485,7 +461,7 @@ pub fn takeString(
 ) ParseError![]const u8 {
     switch (ch) {
         keywords.DQUOTE => {
-            return self.takeStringAssume();
+            return self.takeStringInner();
         },
         else => {
             return ParseError.InvalidString;
@@ -501,7 +477,7 @@ pub fn takeNullableString(
 
     switch (ch) {
         keywords.DQUOTE => {
-            return self.takeStringAssume();
+            return self.takeStringInner();
         },
         keywords.NULL[0] => {
             try self.consumeNullAssume();
@@ -521,10 +497,10 @@ pub fn consumeFieldTerminator(
     }
 }
 
-pub fn takeFieldAssume(
+pub fn takeFieldInner(
     self: *Tokenizer,
 ) ParseError![]const u8 {
-    const name = self.takeStringAssume();
+    const name = self.takeStringInner();
 
     try self.consumeFieldTerminator();
 
@@ -598,7 +574,7 @@ pub fn tokenValueType(
     };
 }
 
-pub fn takeTokenPeek(
+pub fn takeTokenPeeked(
     self: *Tokenizer,
     ch: u8,
 ) ParseError!Token {
@@ -607,7 +583,7 @@ pub fn takeTokenPeek(
             return .{ .number = try self.takeNumber(ch) };
         },
         keywords.DQUOTE => {
-            const value = try self.takeStringAssume();
+            const value = try self.takeStringInner();
 
             const peeked = self.peekChar() orelse return .{
                 .string = value,
@@ -680,10 +656,10 @@ pub inline fn takeToken(
 ) ParseError!Token {
     const ch = self.takeChar() orelse return ParseError.ExpectedToken;
 
-    return self.takeTokenPeek(ch);
+    return self.takeTokenPeeked(ch);
 }
 
-pub fn takeTokenExpectPeek(
+pub fn takeTokenExpectPeeked(
     self: *Tokenizer,
     ch: u8,
     comptime expected: TokenType,
@@ -738,7 +714,7 @@ pub inline fn takeTokenExpect(
 ) ParseError!tokenValueType(expected) {
     const ch = self.takeChar() orelse return ParseError.ExpectedToken;
 
-    return self.takeTokenExpectPeek(ch, expected);
+    return self.takeTokenExpectPeeked(ch, expected);
 }
 
 pub const TokenTypeNullable = enum {
@@ -777,7 +753,7 @@ pub fn tokenValueTypeNullable(
     };
 }
 
-pub fn takeTokenExpectNullablePeek(
+pub fn takeTokenExpectNullablePeeked(
     self: *Tokenizer,
     ch: u8,
     comptime expected: TokenTypeNullable,
@@ -805,7 +781,7 @@ pub inline fn takeTokenExpectNullable(
 ) ParseError!tokenValueTypeNullable(expected) {
     const ch = self.takeChar() orelse return ParseError.ExpectedToken;
 
-    return self.takeTokenExpectNullablePeek(ch, expected);
+    return self.takeTokenExpectNullablePeeked(ch, expected);
 }
 
 pub fn nextToken(
@@ -813,7 +789,7 @@ pub fn nextToken(
 ) ParseError!Token {
     const ch = try self.consumeWhitespace() orelse return ParseError.ExpectedToken;
 
-    return self.takeTokenPeek(ch);
+    return self.takeTokenPeeked(ch);
 }
 
 pub fn nextTokenExpect(
@@ -822,7 +798,7 @@ pub fn nextTokenExpect(
 ) ParseError!tokenValueType(expected) {
     const ch = try self.consumeWhitespace() orelse return ParseError.ExpectedToken;
 
-    return self.takeTokenExpectPeek(ch, expected);
+    return self.takeTokenExpectPeeked(ch, expected);
 }
 
 pub fn nextTokenExpectNullable(
