@@ -1,6 +1,8 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+const keywords = @import("keywords.zig");
+
 const Tokenizer = @import("tokenizer.zig");
 
 const Token = Tokenizer.Token;
@@ -44,14 +46,56 @@ pub const UnionRepresentation = enum {
     untagged,
 };
 
+pub const UnionDeserializeOpts = struct {
+    representation: UnionRepresentation = .externally_tagged,
+    assume_internal_tag_is_first: bool = true,
+};
+
 pub const DeserializeOpts = struct {
     allow_trailing_comma: bool = true,
     whitespace: bool = true,
     precice_errors: bool = builtin.mode == .Debug,
-    // TODO: move this into the type itself to allow multiple types unions to
-    // be parsed.
-    union_representation: UnionRepresentation = .externally_tagged,
+    union_opts: UnionDeserializeOpts,
 };
+
+fn optionalize(comptime T: type) type {
+    comptime {
+        expectStruct(T);
+
+        const info = @typeInfo(T).@"struct";
+
+        const fields = info.fields;
+
+        var new_fields: [fields.len]std.builtin.Type.StructField = undefined;
+
+        for (fields, 0..) |field, i| {
+            var new_type = field.type;
+
+            if (@typeInfo(new_type) == .@"struct") {
+                new_type = ?optionalize(new_type);
+            } else {
+                new_type = ?new_type;
+            }
+
+            new_fields[i] = .{
+                .name = field.name,
+                .type = ?field.type,
+                .is_comptime = field.is_comptime,
+                .alignment = field.alignment,
+            };
+        }
+
+        return @Type(.{
+            .@"struct" = .{
+                .fields = &new_fields,
+                .backing_integer = info.backing_integer,
+                .decls = info.decls,
+                .is_tuple = info.is_tuple,
+                .layout = info.layout,
+            },
+        });
+    }
+}
 
 pub fn expectBoolean(
     comptime T: type,
@@ -160,6 +204,34 @@ pub fn expectUnion(
     }
 }
 
+pub fn unionTags(
+    comptime T: type,
+) type {
+    comptime {
+        expectUnion(T);
+
+        const union_fields = @typeInfo(T).@"union".fields;
+
+        var tags: [union_fields.len]std.builtin.Type.EnumField = undefined;
+
+        for (union_fields, 0..) |field, i| {
+            tags[i] = .{
+                .name = field.name,
+                .value = i,
+            };
+        }
+
+        return @Type(.{
+            .@"enum" = .{
+                .tag_type = std.math.IntFittingRange(0, union_fields.len),
+                .fields = tags[0..],
+                .decls = &[_]std.builtin.Type.Declaration{},
+                .is_exhaustive = true,
+            },
+        });
+    }
+}
+
 pub fn unionValueTags(
     comptime T: type,
 ) type {
@@ -205,7 +277,7 @@ pub fn unionVoidTags(
         var tag_i = 0;
 
         for (union_fields) |field| {
-            if (field.type != void) {
+            if (field.type == void) {
                 tags[tag_i] = .{
                     .name = field.name,
                     .value = tag_i,
@@ -275,10 +347,7 @@ pub inline fn createUndefined(
 pub inline fn tokenFitsType(
     comptime T: type,
     token_type: TokenTypePrimitive,
-    comptime opts: DeserializeOpts,
 ) bool {
-    _ = opts;
-
     switch (@typeInfo(T)) {
         .bool => {
             return token_type == .true or token_type == .false;
@@ -315,6 +384,101 @@ pub inline fn tokenFitsType(
         else => {
             @compileError("Unimplemented type!");
         },
+    }
+}
+
+pub fn skipStructInner(
+    source: *Tokenizer,
+    comptime opts: DeserializeOpts,
+) DeserializeError!void {
+    while (true) {
+        switch (try peekNextTokenTypeDiscard(source, opts)) {
+            .object_end => {
+                break;
+            },
+            .object_begin => {
+                try skipStructInner(source, opts);
+            },
+            .array_begin => {
+                try skipArrayInner(source, opts);
+            },
+            .true => {
+                source.skipTrue();
+            },
+            .false => {
+                source.skipFalse();
+            },
+            .number => {
+                source.skipNumber();
+            },
+            .string => {
+                source.skipString();
+            },
+            else => {
+                continue;
+            },
+        }
+    }
+}
+
+pub fn skipArrayInner(
+    source: *Tokenizer,
+    comptime opts: DeserializeOpts,
+) DeserializeError!void {
+    while (true) {
+        switch (try peekNextTokenTypeDiscard(source, opts)) {
+            .array_end => {
+                break;
+            },
+            .object_begin => {
+                try skipStructInner(source, opts);
+            },
+            .array_begin => {
+                try skipArrayInner(source, opts);
+            },
+            .true => {
+                source.skipTrue();
+            },
+            .false => {
+                source.skipFalse();
+            },
+            .number => {
+                source.skipNumber();
+            },
+            .string => {
+                source.skipString();
+            },
+            else => {
+                continue;
+            },
+        }
+    }
+}
+
+pub fn skipNext(
+    source: *Tokenizer,
+    comptime opts: DeserializeOpts,
+) DeserializeError!void {
+    switch (try peekNextTokenTypeDiscard(source, opts)) {
+        .object_begin => {
+            try skipStructInner(source, opts);
+        },
+        .array_begin => {
+            try skipArrayInner(source, opts);
+        },
+        .true => {
+            source.skipTrue();
+        },
+        .false => {
+            source.skipFalse();
+        },
+        .number => {
+            source.skipNumber();
+        },
+        .string => {
+            source.skipString();
+        },
+        else => {},
     }
 }
 

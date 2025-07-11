@@ -879,24 +879,7 @@ fn deserializeOptionalArray(
 // --------------------------------------------------
 // deserializeStruct
 
-fn firstStructFieldName(
-    source: *Tokenizer,
-    comptime opts: DeserializeOpts,
-) DeserializeError!?[]const u8 {
-    switch (try common.peekNextTokenTypeDiscard(source, opts)) {
-        .string => {
-            return try source.takeFieldAssume();
-        },
-        .object_end => {
-            return null;
-        },
-        else => {
-            return DeserializeError.ExpectedField;
-        },
-    }
-}
-
-fn takeStructFieldName(
+fn nextStructFieldNameInner(
     source: *Tokenizer,
     comptime opts: DeserializeOpts,
 ) DeserializeError!?[]const u8 {
@@ -926,7 +909,7 @@ fn nextStructFieldName(
 ) DeserializeError!?[]const u8 {
     switch (try common.peekNextTokenTypeDiscard(source, opts)) {
         .comma => {
-            return takeStructFieldName(source, opts);
+            return nextStructFieldNameInner(source, opts);
         },
         .object_end => {
             return null;
@@ -1008,7 +991,18 @@ fn deserializeStructAssume(
     var seen = [1]bool{false} ** info.fields.len;
 
     { // Parse first field
-        const field_name = try firstStructFieldName(source, opts) orelse return visitFields(T, dest, &seen);
+        // Objects have to contain at least a single field to contain a comma so either there is a
+        // field here or the object doesnt contain any fields at all. Because of this we need to
+        // implement different logic here than in 'nextStructFieldName'.
+        const field_name = switch (common.peekNextTokenTypeDiscard(source, opts)) {
+            .string => try source.takeFieldAssume(),
+            .object_end => {
+                return visitFields(T, dest, &seen);
+            },
+            else => {
+                return DeserializeError.UnexpectedToken;
+            },
+        };
 
         try deserializeStructFieldValue(
             T,
@@ -1135,7 +1129,7 @@ inline fn deserializeEnumAssume(
 
     const tag = try source.takeStringAssume();
 
-    dest.* = std.meta.stringToEnum(T, tag) orelse DeserializeError.UnknownTag;
+    dest.* = std.meta.stringToEnum(T, tag) orelse return DeserializeError.UnknownTag;
 }
 
 fn deserializeEnum(
@@ -1222,24 +1216,56 @@ fn deserializeOptionalEnumInferred(
 // --------------------------------------------------
 // deserializeUnion
 
-fn UnionFieldType(
+// TODO: Make tag field name overridable
+fn getInternalTagInner(
     comptime T: type,
-    tag_name: []const u8,
-) type {
-    common.expectUnion(T);
+    source: *Tokenizer,
+    comptime opts: DeserializeOpts,
+) DeserializeError!common.unionTags(T) {
+    {
+        common.expectUnion(T);
+    }
 
-    const info = @typeInfo(T).@"union";
+    const TagType = common.unionTags(T);
 
-    inline for (info.fields) |field| {
-        if (std.mem.eql(u8, tag_name, field.name)) {
-            return field.type;
+    {
+        const field_name = switch (try common.peekNextTokenTypeDiscard(source, opts)) {
+            .string => try source.takeFieldAssume(),
+            .object_end => {
+                return DeserializeError.ExpectedTag;
+            },
+            else => {
+                return DeserializeError.UnexpectedToken;
+            },
+        };
+
+        if (std.mem.eql(u8, field_name, "type")) {
+            var tag: TagType = undefined;
+            try deserializeEnum(TagType, &tag, source, opts);
+
+            return tag;
+        } else {
+            try common.skipNext(source, opts);
         }
     }
 
-    unreachable;
+    while (try nextStructFieldName(source, opts)) |field_name| {
+        if (std.mem.eql(u8, field_name, "type")) {
+            var tag: TagType = undefined;
+            try deserializeEnum(TagType, &tag, source, opts);
+
+            return tag;
+        } else {
+            try common.skipNext(source, opts);
+        }
+    }
+
+    return DeserializeError.ExpectedTag;
 }
 
-fn deserializeUnionInner(
+fn deserializeStructInternalUnion() DeserializeError!void {}
+
+fn deserializeUnionValueAssume(
     comptime T: type,
     dest: *T,
     source: *Tokenizer,
@@ -1247,47 +1273,74 @@ fn deserializeUnionInner(
 ) DeserializeError!void {
     common.expectUnion(T);
 
-    switch (opts.union_representation) {
+    const ValueTagsEnum = common.unionValueTags(T);
+
+    if (@typeInfo(ValueTagsEnum).@"enum".fields.len == 0) {
+        return DeserializeError.UnknownTag;
+    }
+
+    switch (opts.union_opts.representation) {
         .externally_tagged => {
-            // get the tag of the union
-            const parsed_tag_name = parse_tag: {
-                if (opts.precice_errors) {
-                    switch (try common.peekNextTokenTypeDiscard(source, opts)) {
-                        .string => {
-                            break :parse_tag try source.takeFieldAssume();
-                        },
-                        else => {
-                            return DeserializeError.ExpectedTag;
-                        },
-                    }
-                } else {
-                    break :parse_tag try common.nextTokenExpect(source, .field, opts);
-                }
-            };
+            var tag: ValueTagsEnum = undefined;
+
+            { // deserialize tag
+                try deserializeEnum(ValueTagsEnum, &tag, source, opts);
+                try source.consumeFieldTerminator();
+            }
 
             { // deserialize value
-                const tags = @typeInfo(common.unionValueTags(T)).@"enum".fields;
+                switch (tag) {
+                    inline else => |t| {
+                        const tag_name = @tagName(t);
 
-                inline for (tags) |tag| {
-                    if (std.mem.eql(u8, tag.name, parsed_tag_name)) {
-                        dest.* = @unionInit(T, tag.name, undefined);
+                        // activate union field
+                        dest.* = @unionInit(T, tag_name, undefined);
 
-                        const FieldType = @FieldType(T, tag.name);
-                        try deserializeInner(FieldType, &@field(dest.*, tag.name), source, opts);
-
-                        break;
-                    }
-                } else {
-                    return DeserializeError.UnknownTag;
+                        try deserializeInner(
+                            @FieldType(T, tag_name),
+                            &@field(dest.*, tag_name),
+                            source,
+                            opts,
+                        );
+                    },
                 }
             }
 
-            // close the union
             return common.nextTokenExpect(source, .object_end, opts);
         },
-        .internally_tagged => {},
+        .internally_tagged => {
+            if (opts.union_opts.assume_internal_tag_is_first) {
+                //
+            } else {
+                const tag = try getInternalTagInner(T, source, opts);
+            }
+        },
         .adjacently_tagged => {},
         .untagged => {},
+    }
+}
+
+fn deserializeUnionEnumValueAssume(
+    comptime T: type,
+    dest: *T,
+    source: *Tokenizer,
+) DeserializeError!void {
+    common.expectUnion(T);
+
+    const VoidTagsEnum = common.unionVoidTags(T);
+
+    if (@typeInfo(VoidTagsEnum).@"enum".fields.len == 0) {
+        return DeserializeError.UnknownTag;
+    }
+
+    var tag: VoidTagsEnum = undefined;
+
+    try deserializeEnumAssume(VoidTagsEnum, &tag, source);
+
+    switch (tag) {
+        inline else => |t| {
+            dest.* = @unionInit(T, @tagName(t), undefined);
+        },
     }
 }
 
@@ -1299,10 +1352,36 @@ fn deserializeUnion(
 ) DeserializeError!void {
     switch (try common.peekNextTokenTypeDiscard(source, opts)) {
         .object_begin => {
-            return deserializeUnionInner(T, dest, source, opts);
+            try deserializeUnionValueAssume(T, dest, source, opts);
         },
         .string => {
-            @panic("Enum unions havent been implemented yet");
+            try deserializeUnionEnumValueAssume(T, dest, source);
+        },
+        else => {
+            return DeserializeError.ExpectedObject;
+        },
+    }
+}
+
+fn deserializeOptionalUnion(
+    comptime T: type,
+    dest: *?T,
+    source: *Tokenizer,
+    comptime opts: DeserializeOpts,
+) DeserializeError!void {
+    switch (try common.peekNextTokenTypeDiscard(source, opts)) {
+        .object_begin => {
+            try deserializeUnionValueAssume(T, &dest.*.?, source, opts);
+
+            // close the union body
+            return common.nextTokenExpect(source, .object_end, opts);
+        },
+        .string => {
+            return deserializeUnionEnumValueAssume(T, &dest.*.?, source);
+        },
+        .null => {
+            dest.* = null;
+            return source.consumeNullAssume();
         },
         else => {
             return DeserializeError.ExpectedObject;
@@ -1344,6 +1423,9 @@ fn deserializeOptional(
         },
         .@"enum" => {
             try deserializeOptionalEnum(Child, dest, source, opts);
+        },
+        .@"union" => {
+            try deserializeOptionalUnion(Child, dest, source, opts);
         },
         .optional => {
             try deserializeOptional(std.meta.Child(T), &dest.*.?, source, opts);

@@ -45,14 +45,14 @@ inline fn assertRemaining(
 }
 
 /// NOTE: Doesnt care if 'self.i' exeeds the lenght of 'self.source'
-inline fn consumeChar(
+pub inline fn consumeChar(
     self: *Tokenizer,
 ) void {
     self.i += 1;
 }
 
 /// NOTE: Doesnt care if 'self.i' exeeds the lenght of 'self.source'
-inline fn consumeChars(
+pub inline fn consumeChars(
     self: *Tokenizer,
     n: usize,
 ) void {
@@ -110,7 +110,7 @@ inline fn consumeLiteral(
     self.consumeChars(literal.len);
 }
 
-fn consumeComment(
+inline fn consumeComment(
     self: *Tokenizer,
 ) void {
     while (!self.isSourceEmpty()) {
@@ -513,14 +513,20 @@ pub fn takeNullableString(
     }
 }
 
+pub fn consumeFieldTerminator(
+    self: *Tokenizer,
+) ParseError!void {
+    if (self.isSourceEmpty() or self.takeCharAssume() != keywords.COLON) {
+        return ParseError.InvalidField;
+    }
+}
+
 pub fn takeFieldAssume(
     self: *Tokenizer,
 ) ParseError![]const u8 {
     const name = self.takeStringAssume();
 
-    if (self.isSourceEmpty() or self.takeCharAssume() != keywords.COLON) {
-        return ParseError.InvalidField;
-    }
+    try self.consumeFieldTerminator();
 
     return name;
 }
@@ -828,23 +834,106 @@ pub fn nextTokenExpectNullable(
     return self.takeTokenExpectNullable(ch, expected);
 }
 
-/// consumes whitespace up until the next token aswell as the first character of it,
-/// then returns the expected type of the token based on the indentifier (the first character)
-/// aswell as the indetifier itself
 pub fn inferrTokenType(
     ch: u8,
 ) ?TokenTypePrimitive {
-    return switch (ch) {
-        '0'...'9', '-' => .number,
-        keywords.DQUOTE => .string,
-        keywords.TRUE[0] => .true,
-        keywords.FALSE[0] => .false,
-        keywords.NULL[0] => .null,
-        keywords.OBJ_BEGIN => .object_begin,
-        keywords.OBJ_END => .object_end,
-        keywords.ARR_BEGIN => .array_begin,
-        keywords.ARR_END => .array_end,
-        keywords.COMMA => .comma,
-        else => null,
-    };
+    switch (ch) {
+        // NOTE: Not sure if this makes sense
+        inline else => |cmpt_ch| {
+            return switch (cmpt_ch) {
+                '0'...'9', '-' => .number,
+                keywords.DQUOTE => .string,
+                keywords.TRUE[0] => .true,
+                keywords.FALSE[0] => .false,
+                keywords.NULL[0] => .null,
+                keywords.OBJ_BEGIN => .object_begin,
+                keywords.OBJ_END => .object_end,
+                keywords.ARR_BEGIN => .array_begin,
+                keywords.ARR_END => .array_end,
+                keywords.COMMA => .comma,
+                else => null,
+            };
+        },
+    }
+}
+
+// NOTE: Specific skip functions assume that the first character has been consumed already
+
+pub fn skipNumber(
+    self: *Tokenizer,
+) void {
+    while (self.takeChar()) |ch| {
+        switch (ch) {
+            ' ', '\t', '\n', '\r' => {
+                break;
+            },
+            keywords.COMMA, keywords.ARR_END, keywords.OBJ_END => {
+                self.i -= 1;
+
+                break;
+            },
+            else => {},
+        }
+    }
+}
+
+pub fn skipString(
+    self: *Tokenizer,
+) void {
+    while (self.takeChar()) |ch| {
+        if (ch == keywords.DQUOTE) {
+            if (!self.isSourceEmpty() and self.takeCharAssume() == keywords.COLON) {
+                self.consumeChar();
+            }
+
+            return;
+        }
+    }
+}
+
+pub fn skipTrue(
+    self: *Tokenizer,
+) void {
+    self.consumeChars(keywords.TRUE.len - 1);
+}
+
+pub fn skipFalse(
+    self: *Tokenizer,
+) void {
+    self.consumeChars(keywords.FALSE.len - 1);
+}
+
+// NOTE: Maybe remove
+pub fn skipTokenPeeked(
+    self: *Tokenizer,
+    ch: u8,
+) ParseError!void {
+    switch (inferrTokenType(ch)) {
+        .number => {
+            self.skipNumber();
+        },
+        .string => {
+            self.skipString();
+        },
+        .true => {
+            self.consumeChars(keywords.TRUE.len - 1);
+        },
+        .false => {
+            self.consumeChars(keywords.FALSE.len - 1);
+        },
+        else => {
+            return ParseError.InvalidToken;
+        },
+    }
+}
+
+// NOTE: Maybe remove
+pub fn skipNextToken(
+    self: *Tokenizer,
+) ParseError!void {
+    if (self.isSourceEmpty()) {
+        return;
+    }
+
+    try self.skipTokenPeeked(self.takeCharAssume());
 }
