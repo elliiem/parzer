@@ -999,6 +999,29 @@ fn visitFields(
     }
 }
 
+fn deserializeStructTrail(
+    comptime T: type,
+    dest: *T,
+    source: *Tokenizer,
+    seen: []bool,
+    comptime opts: DeserializeOpts,
+) DeserializeError!void {
+    common.expectStruct(T);
+
+    while (try nextStructFieldName(source, opts)) |field_name| {
+        try deserializeStructFieldValue(
+            T,
+            dest,
+            seen,
+            source,
+            field_name,
+            opts,
+        );
+    }
+
+    return visitFields(T, dest, seen);
+}
+
 fn deserializeStructInner(
     comptime T: type,
     dest: *T,
@@ -1011,7 +1034,7 @@ fn deserializeStructInner(
 
     var seen = [1]bool{false} ** info.fields.len;
 
-    {
+    { // deserialize first field
         const field_name = firstStructFieldName(source, opts) orelse return visitFields(T, dest, &seen);
 
         try deserializeStructFieldValue(
@@ -1024,20 +1047,7 @@ fn deserializeStructInner(
         );
     }
 
-    {
-        while (try nextStructFieldName(source, opts)) |field_name| {
-            try deserializeStructFieldValue(
-                T,
-                dest,
-                &seen,
-                source,
-                field_name,
-                opts,
-            );
-        }
-    }
-
-    return visitFields(T, dest, &seen);
+    return deserializeStructTrail(T, dest, source, &seen, opts);
 }
 
 fn deserializeStructRecheck(
@@ -1250,7 +1260,7 @@ fn searchTagInner(
 
             return tag;
         } else {
-            try common.skipNext(source, opts);
+            try common.skipNextObject(source, opts);
         }
     }
 
@@ -1261,14 +1271,67 @@ fn searchTagInner(
 
             return tag;
         } else {
-            try common.skipNext(source, opts);
+            try common.skipNextObject(source, opts);
         }
     }
 
     return DeserializeError.ExpectedTag;
 }
 
-fn deserializeStructInternalUnion() DeserializeError!void {}
+fn deserializeStructInternalUnion(
+    comptime T: type,
+    dest: *T,
+    source: *Tokenizer,
+    comptime opts: DeserializeOpts,
+) DeserializeError!void {
+    common.expectStruct(T);
+
+    const info = @typeInfo(T).@"struct";
+
+    var seen = [1]bool{false} ** info.fields.len;
+
+    {
+        const field_name = try firstStructFieldName(source, opts) orelse return visitFields(T, dest, &seen);
+
+        if (std.mem.eql(u8, field_name, "type")) {
+            try source.skipNextTokenExpect(.string);
+
+            return deserializeStructTrail(T, dest, source, &seen, opts);
+        }
+
+        if (opts.union_opts.assume_internal_tag_is_first) {
+            return DeserializeError.ExpectedTag;
+        }
+
+        try deserializeStructFieldValue(
+            T,
+            dest,
+            &seen,
+            source,
+            field_name,
+            opts,
+        );
+    }
+
+    while (try nextStructFieldName(source, opts)) |field_name| {
+        if (std.mem.eql(u8, field_name, "type")) {
+            try source.skipNextTokenExpect(.string);
+
+            return deserializeStructTrail(T, dest, source, &seen, opts);
+        }
+
+        try deserializeStructFieldValue(
+            T,
+            dest,
+            &seen,
+            source,
+            field_name,
+            opts,
+        );
+    }
+
+    return visitFields(T, dest, &seen);
+}
 
 fn deserializeUnionValueInner(
     comptime T: type,
@@ -1314,12 +1377,24 @@ fn deserializeUnionValueInner(
             return common.nextTokenExpect(source, .object_end, opts);
         },
         .internally_tagged => {
-            if (opts.union_opts.assume_internal_tag_is_first) {
-                //
-            } else {
-                const tag = try searchTagInner(T, source, opts);
+            const tag = try searchTagInner(T, source, opts);
 
-                _ = tag;
+            { // deserialize value
+                switch (tag) {
+                    inline else => |t| {
+                        const tag_name = @tagName(t);
+
+                        // activate union field
+                        dest.* = @unionInit(T, tag_name, undefined);
+
+                        return deserializeStructInternalUnion(
+                            @FieldType(T, tag_name),
+                            &@field(dest.*, tag_name),
+                            source,
+                            opts,
+                        );
+                    },
+                }
             }
         },
         .adjacently_tagged => {},

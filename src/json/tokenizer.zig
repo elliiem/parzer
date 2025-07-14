@@ -489,7 +489,7 @@ pub fn takeNullableString(
     }
 }
 
-pub fn consumeFieldTerminator(
+fn consumeFieldTerminator(
     self: *Tokenizer,
 ) ParseError!void {
     if (self.isSourceEmpty() or self.takeCharAssume() != keywords.COLON) {
@@ -507,7 +507,7 @@ pub fn takeFieldInner(
     return name;
 }
 
-fn takeField(
+pub fn takeField(
     self: *Tokenizer,
     ch: u8,
 ) ParseError![]const u8 {
@@ -835,7 +835,7 @@ pub fn inferrTokenType(
 
 // NOTE: Specific skip functions assume that the first character has been consumed already
 
-pub fn skipNumber(
+pub fn skipNumberAssume(
     self: *Tokenizer,
 ) void {
     while (self.takeChar()) |ch| {
@@ -853,12 +853,12 @@ pub fn skipNumber(
     }
 }
 
-pub fn skipString(
+pub fn skipStringInner(
     self: *Tokenizer,
 ) void {
     while (self.takeChar()) |ch| {
         if (ch == keywords.DQUOTE) {
-            if (!self.isSourceEmpty() and self.takeCharAssume() == keywords.COLON) {
+            if (!self.isSourceEmpty() and self.peekCharAssume() == keywords.COLON) {
                 self.consumeChar();
             }
 
@@ -867,29 +867,34 @@ pub fn skipString(
     }
 }
 
-pub fn skipTrue(
+pub fn skipTrueAssume(
     self: *Tokenizer,
 ) void {
     self.consumeChars(keywords.TRUE.len - 1);
 }
 
-pub fn skipFalse(
+pub fn skipFalseAssume(
     self: *Tokenizer,
 ) void {
     self.consumeChars(keywords.FALSE.len - 1);
 }
 
-// NOTE: Maybe remove
+pub fn skipNullAssume(
+    self: *Tokenizer,
+) void {
+    self.consumeChars(keywords.NULL.len - 1);
+}
+
 pub fn skipTokenPeeked(
     self: *Tokenizer,
     ch: u8,
 ) ParseError!void {
     switch (inferrTokenType(ch)) {
         .number => {
-            self.skipNumber();
+            self.skipNumberAssume();
         },
         .string => {
-            self.skipString();
+            self.skipStringInner();
         },
         .true => {
             self.consumeChars(keywords.TRUE.len - 1);
@@ -897,19 +902,109 @@ pub fn skipTokenPeeked(
         .false => {
             self.consumeChars(keywords.FALSE.len - 1);
         },
-        else => {
-            return ParseError.InvalidToken;
+        else => {},
+    }
+}
+
+pub fn skipTokenExpectPeeked(
+    self: *Tokenizer,
+    ch: u8,
+    comptime expected: TokenType,
+) ParseError!void {
+    switch (inferrTokenType(ch) orelse return ParseError.InvalidToken) {
+        .number => {
+            if (expected != .number) {
+                return ParseError.UnexpectedToken;
+            }
+
+            return self.skipNumberAssume();
+        },
+        .string => {
+            if (expected != .string and expected != .field) {
+                return ParseError.UnexpectedToken;
+            }
+
+            return self.skipStringInner();
+        },
+        .true => {
+            if (expected != .bool) {
+                return ParseError.UnexpectedToken;
+            }
+
+            return self.skipTrueAssume();
+        },
+        .false => {
+            if (expected != .bool) {
+                return ParseError.UnexpectedToken;
+            }
+
+            return self.skipFalseAssume();
+        },
+        .null => {
+            if (expected != .null) {
+                return ParseError.UnexpectedToken;
+            }
+
+            return self.skipNullAssume();
+        },
+        .object_begin => {
+            if (expected != .object_begin) {
+                return ParseError.UnexpectedToken;
+            }
+        },
+        .object_end => {
+            if (expected != .object_end) {
+                return ParseError.UnexpectedToken;
+            }
+        },
+        .array_begin => {
+            if (expected != .array_begin) {
+                return ParseError.UnexpectedToken;
+            }
+        },
+        .array_end => {
+            if (expected != .array_end) {
+                return ParseError.UnexpectedToken;
+            }
+        },
+        .comma => {
+            if (expected != .comma) {
+                return ParseError.UnexpectedToken;
+            }
         },
     }
 }
 
-// NOTE: Maybe remove
+pub fn skipToken(
+    self: *Tokenizer,
+) ParseError!void {
+    const ch = self.takeChar() orelse return;
+
+    try self.skipTokenPeeked(ch);
+}
+
+pub fn skipTokenExpect(
+    self: *Tokenizer,
+    comptime expected: TokenType,
+) ParseError!void {
+    const ch = self.takeChar() orelse return;
+
+    try self.skipTokenExpectPeeked(ch, expected);
+}
+
 pub fn skipNextToken(
     self: *Tokenizer,
 ) ParseError!void {
-    if (self.isSourceEmpty()) {
-        return;
-    }
+    const ch = try self.consumeWhitespace() orelse return;
 
-    try self.skipTokenPeeked(self.takeCharAssume());
+    try self.skipTokenPeeked(ch);
+}
+
+pub fn skipNextTokenExpect(
+    self: *Tokenizer,
+    comptime expected: TokenType,
+) ParseError!void {
+    const ch = try self.consumeWhitespace() orelse return ParseError.ExpectedToken;
+
+    try self.skipTokenExpectPeeked(ch, expected);
 }

@@ -403,16 +403,16 @@ pub fn skipStructInner(
                 try skipArrayInner(source, opts);
             },
             .true => {
-                source.skipTrue();
+                source.skipTrueAssume();
             },
             .false => {
-                source.skipFalse();
+                source.skipFalseAssume();
             },
             .number => {
-                source.skipNumber();
+                source.skipNumberAssume();
             },
             .string => {
-                source.skipString();
+                source.skipStringInner();
             },
             else => {
                 continue;
@@ -437,16 +437,16 @@ pub fn skipArrayInner(
                 try skipArrayInner(source, opts);
             },
             .true => {
-                source.skipTrue();
+                source.skipTrueAssume();
             },
             .false => {
-                source.skipFalse();
+                source.skipFalseAssume();
             },
             .number => {
-                source.skipNumber();
+                source.skipNumberAssume();
             },
             .string => {
-                source.skipString();
+                source.skipStringInner();
             },
             else => {
                 continue;
@@ -455,7 +455,7 @@ pub fn skipArrayInner(
     }
 }
 
-pub fn skipNext(
+pub fn skipNextObject(
     source: *Tokenizer,
     comptime opts: DeserializeOpts,
 ) DeserializeError!void {
@@ -467,16 +467,16 @@ pub fn skipNext(
             try skipArrayInner(source, opts);
         },
         .true => {
-            source.skipTrue();
+            source.skipTrueAssume();
         },
         .false => {
-            source.skipFalse();
+            source.skipFalseAssume();
         },
         .number => {
-            source.skipNumber();
+            source.skipNumberAssume();
         },
         .string => {
-            source.skipString();
+            source.skipStringInner();
         },
         else => {},
     }
