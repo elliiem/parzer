@@ -482,6 +482,70 @@ pub fn skipNextObject(
     }
 }
 
+pub const ObjectType = enum {
+    number,
+    string,
+    bool,
+    object,
+    array,
+};
+
+pub fn skipNextObjectExpect(
+    source: *Tokenizer,
+    comptime expected: ObjectType,
+    comptime opts: DeserializeOpts,
+) DeserializeError!void {
+    switch (expected) {
+        .array => {
+            switch (try peekNextTokenTypeDiscard(source, opts)) {
+                .array_begin => {
+                    try skipArrayInner(source, opts);
+                },
+                else => {
+                    return DeserializeError.ExpectedArray;
+                },
+            }
+        },
+        .object => {
+            switch (try peekNextTokenTypeDiscard(source, opts)) {
+                .array_begin => {
+                    try skipArrayInner(source, opts);
+                },
+                else => {
+                    return DeserializeError.ExpectedArray;
+                },
+            }
+        },
+        inline else => |expected_inner| {
+            if (opts.whitespace) {
+                switch (expected_inner) {
+                    .number => {
+                        try source.skipNextTokenExpect(.number);
+                    },
+                    .string => {
+                        try source.skipNextTokenExpect(.string);
+                    },
+                    .bool => {
+                        try source.skipNextTokenExpect(.bool);
+                    },
+                }
+            } else {
+                switch (expected_inner) {
+                    .number => {
+                        try source.skipTokenExpect(.number);
+                    },
+                    .string => {
+                        try source.skipTokenExpect(.string);
+                    },
+                    .bool => {
+                        try source.skipTokenExpect(.bool);
+                    },
+                }
+            }
+        },
+    }
+}
+
 pub inline fn peekNext(
     source: *Tokenizer,
     comptime opts: DeserializeOpts,

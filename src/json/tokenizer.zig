@@ -489,7 +489,7 @@ pub fn takeNullableString(
     }
 }
 
-fn consumeFieldTerminator(
+pub fn consumeFieldTerminator(
     self: *Tokenizer,
 ) ParseError!void {
     if (self.isSourceEmpty() or self.takeCharAssume() != keywords.COLON) {
@@ -832,8 +832,6 @@ pub fn inferrTokenType(
         },
     }
 }
-
-// NOTE: Specific skip functions assume that the first character has been consumed already
 
 pub fn skipNumberAssume(
     self: *Tokenizer,

@@ -1278,34 +1278,57 @@ fn searchTagInner(
     return DeserializeError.ExpectedTag;
 }
 
-fn deserializeStructInternalUnion(
+fn deserializeStructInternalUnionAnyPosInner(
     comptime T: type,
     dest: *T,
     source: *Tokenizer,
     comptime opts: DeserializeOpts,
 ) DeserializeError!void {
-    common.expectStruct(T);
+    common.expectUnion(T);
 
-    const info = @typeInfo(T).@"struct";
+    // get active union field
+    const tag = try searchTagInner(T, source, opts);
 
+    const tag_name = switch (tag) {
+        inline else => |field_tag_inner| @tagName(field_tag_inner),
+    };
+
+    // activate union field
+    dest.* = @unionInit(T, tag_name, undefined);
+
+    // NOTE: For clarity this is called child and not field,
+    // as calling it the latter could create confusion between the struct
+    // fields and the union fields.
+    const Child = @FieldType(T, tag_name);
+    common.expectStruct(Child);
+
+    const child_dest = &@field(dest.*, tag_name);
+
+    // setup seen fields
+    const info = @typeInfo(Child).@"struct";
     var seen = [1]bool{false} ** info.fields.len;
 
-    {
-        const field_name = try firstStructFieldName(source, opts) orelse return visitFields(T, dest, &seen);
+    { // deserialize first field
+        const field_name = try firstStructFieldName(source, opts) orelse {
+            return visitFields(Child, child_dest, &seen);
+        };
 
         if (std.mem.eql(u8, field_name, "type")) {
             try source.skipNextTokenExpect(.string);
 
-            return deserializeStructTrail(T, dest, source, &seen, opts);
-        }
-
-        if (opts.union_opts.assume_internal_tag_is_first) {
-            return DeserializeError.ExpectedTag;
+            // NOTE: Once we have consumed the tag field we can resume parsing the struct we would do normally
+            return deserializeStructTrail(
+                Child,
+                child_dest,
+                source,
+                &seen,
+                opts,
+            );
         }
 
         try deserializeStructFieldValue(
-            T,
-            dest,
+            Child,
+            child_dest,
             &seen,
             source,
             field_name,
@@ -1313,16 +1336,24 @@ fn deserializeStructInternalUnion(
         );
     }
 
+    // deserialize remaining fields
     while (try nextStructFieldName(source, opts)) |field_name| {
         if (std.mem.eql(u8, field_name, "type")) {
             try source.skipNextTokenExpect(.string);
 
-            return deserializeStructTrail(T, dest, source, &seen, opts);
+            // NOTE: Once we have consumed the tag field we can resume parsing the struct we would do normally
+            return deserializeStructTrail(
+                Child,
+                child_dest,
+                source,
+                &seen,
+                opts,
+            );
         }
 
         try deserializeStructFieldValue(
-            T,
-            dest,
+            Child,
+            child_dest,
             &seen,
             source,
             field_name,
@@ -1330,7 +1361,64 @@ fn deserializeStructInternalUnion(
         );
     }
 
-    return visitFields(T, dest, &seen);
+    return visitFields(Child, child_dest, &seen);
+}
+
+fn deserializeStructInternalUnionInner(
+    comptime T: type,
+    dest: *T,
+    source: *Tokenizer,
+    comptime opts: DeserializeOpts,
+) DeserializeError!void {
+    common.expectUnion(T);
+
+    const ValueTagsEnum = common.unionValueTags(T);
+
+    { // skip field name
+        if (opts.precice_errors) {
+            const field_name = try firstStructFieldName(source, opts) orelse return DeserializeError.ExpectedTag;
+
+            if (!std.mem.eql(u8, field_name, "type")) {
+                return DeserializeError.ExpectedTag;
+            }
+        } else {
+            try common.skipNextObjectExpect(source, .string, opts);
+        }
+    }
+
+    const tag: ValueTagsEnum = switch (try common.peekNextTokenTypeDiscard(source, opts)) {
+        .string => std.meta.stringToEnum(
+            ValueTagsEnum,
+            try source.takeStringInner(),
+        ) orelse {
+            return DeserializeError.UnknownTag;
+        },
+        else => {
+            return DeserializeError.ExpectedTag;
+        },
+    };
+
+    // deserialize value
+    switch (tag) {
+        inline else => |tag_inner| {
+            const tag_name = @tagName(tag_inner);
+
+            // activate union field
+            dest.* = @unionInit(T, tag_name, undefined);
+
+            // setup seen fields
+            const info = @typeInfo(@FieldType(T, tag_name)).@"struct";
+            var seen = [1]bool{false} ** info.fields.len;
+
+            return deserializeStructTrail(
+                @FieldType(T, tag_name),
+                &@field(dest.*, tag_name),
+                source,
+                &seen,
+                opts,
+            );
+        },
+    }
 }
 
 fn deserializeUnionValueInner(
@@ -1349,52 +1437,43 @@ fn deserializeUnionValueInner(
 
     switch (opts.union_opts.representation) {
         .externally_tagged => {
-            var tag: ValueTagsEnum = undefined;
+            const tag: ValueTagsEnum = switch (try common.peekNextTokenTypeDiscard(source, opts)) {
+                .string => std.meta.stringToEnum(
+                    ValueTagsEnum,
+                    try source.takeFieldInner(),
+                ) orelse {
+                    return DeserializeError.UnknownTag;
+                },
+                else => {
+                    return DeserializeError.ExpectedTag;
+                },
+            };
 
-            { // deserialize tag
-                try deserializeEnum(ValueTagsEnum, &tag, source, opts);
-                try source.consumeFieldTerminator();
-            }
+            // deserialize value
+            switch (tag) {
+                inline else => |t| {
+                    const tag_name = @tagName(t);
 
-            { // deserialize value
-                switch (tag) {
-                    inline else => |t| {
-                        const tag_name = @tagName(t);
+                    // activate union field
+                    dest.* = @unionInit(T, tag_name, undefined);
 
-                        // activate union field
-                        dest.* = @unionInit(T, tag_name, undefined);
-
-                        try deserializeChild(
-                            @FieldType(T, tag_name),
-                            &@field(dest.*, tag_name),
-                            source,
-                            opts,
-                        );
-                    },
-                }
+                    return deserializeChild(
+                        @FieldType(T, tag_name),
+                        &@field(dest.*, tag_name),
+                        source,
+                        opts,
+                    );
+                },
             }
 
             return common.nextTokenExpect(source, .object_end, opts);
         },
+        // NOTE: Damn java devs
         .internally_tagged => {
-            const tag = try searchTagInner(T, source, opts);
-
-            { // deserialize value
-                switch (tag) {
-                    inline else => |t| {
-                        const tag_name = @tagName(t);
-
-                        // activate union field
-                        dest.* = @unionInit(T, tag_name, undefined);
-
-                        return deserializeStructInternalUnion(
-                            @FieldType(T, tag_name),
-                            &@field(dest.*, tag_name),
-                            source,
-                            opts,
-                        );
-                    },
-                }
+            if (opts.union_opts.assume_internal_tag_is_first) {
+                return deserializeStructInternalUnionInner(T, dest, source, opts);
+            } else {
+                return deserializeStructInternalUnionAnyPosInner(T, dest, source, opts);
             }
         },
         .adjacently_tagged => {},
