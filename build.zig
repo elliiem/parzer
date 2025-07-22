@@ -7,11 +7,12 @@ const StepOpts = struct {
     optimize: ?std.builtin.OptimizeMode = null,
 };
 
-fn stepTest(b: *Build, comptime test_root: []const u8, opts: StepOpts) *Build.Step {
+fn stepTest(
+    b: *Build,
+    parzer: *Build.Module,
+) *Build.Step {
     const tests = b.addTest(.{
-        .root_source_file = b.path(test_root),
-        .target = opts.target orelse b.standardTargetOptions(.{}),
-        .optimize = opts.optimize orelse b.standardOptimizeOption(.{}),
+        .root_module = parzer,
     });
 
     const run = b.addRunArtifact(tests);
@@ -24,29 +25,33 @@ fn stepTest(b: *Build, comptime test_root: []const u8, opts: StepOpts) *Build.St
 }
 
 const ModuleOpts = struct {
+    root_path: []const u8,
     target: ?Build.ResolvedTarget = null,
     optimize: ?std.builtin.OptimizeMode = null,
 };
 
-fn moduleParzer(b: *Build, opts: ModuleOpts) *Build.Module {
+fn moduleParzer(
+    b: *Build,
+    opts: ModuleOpts,
+) *Build.Module {
     return b.addModule("parzer", .{
-        .root_source_file = b.path("src/parzer.zig"),
+        .root_source_file = b.path(opts.root_path),
         .target = opts.target orelse b.standardTargetOptions(.{}),
         .optimize = opts.optimize orelse b.standardOptimizeOption(.{}),
     });
 }
 
-pub fn build(b: *Build) void {
+pub fn build(
+    b: *Build,
+) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    _ = moduleParzer(b, .{
+    const parzer = moduleParzer(b, .{
+        .root_path = "src/parzer.zig",
         .target = target,
         .optimize = optimize,
     });
 
-    _ = stepTest(b, "src/test.zig", .{
-        .target = target,
-        .optimize = optimize,
-    });
+    _ = stepTest(b, parzer);
 }

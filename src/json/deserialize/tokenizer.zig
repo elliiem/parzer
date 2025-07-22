@@ -1,20 +1,18 @@
 const std = @import("std");
 
-const keywords = @import("keywords.zig");
+const keywords = @import("../keywords.zig");
 
-const Tokenizer = @This();
+pub const Tokenizer = @This();
 
 source: []const u8,
 i: usize = 0,
 
-pub const ParseError = error{
-    InvalidNumber,
-    InvalidString,
-    InvalidField,
-    UnexpectedToken,
-    InvalidToken,
-    ExpectedToken,
-};
+const ParseError = @import("errors.zig").ParseError;
+
+const types = @import("token-types.zig");
+
+const Token = types.Token;
+const OptionalToken = types.OptionalToken;
 
 // --------------------------------------------------
 // Helpers
@@ -95,6 +93,12 @@ pub inline fn peekChar(
     }
 
     return self.peekCharAssume();
+}
+
+inline fn prevCharAssume(
+    self: Tokenizer,
+) u8 {
+    return self.source[self.i - 1];
 }
 
 inline fn consumeLiteral(
@@ -523,57 +527,6 @@ pub fn takeField(
 // Primitives
 // --------------------------------------------------
 
-pub const TokenTypePrimitive = enum {
-    number,
-    string,
-    true,
-    false,
-    null,
-    object_begin,
-    object_end,
-    array_begin,
-    array_end,
-    comma,
-};
-
-pub const TokenType = enum {
-    number,
-    string,
-    bool,
-    field,
-    null,
-    object_begin,
-    object_end,
-    array_begin,
-    array_end,
-    comma,
-};
-
-pub const Token = union(TokenType) {
-    number: []const u8,
-    string: []const u8,
-    bool: bool,
-    field: []const u8,
-    null: void,
-    object_begin: void,
-    object_end: void,
-    array_begin: void,
-    array_end: void,
-    comma: void,
-};
-
-pub fn tokenValueType(
-    comptime token: TokenType,
-) type {
-    return switch (token) {
-        .number => []const u8,
-        .string => []const u8,
-        .bool => bool,
-        .field => []const u8,
-        else => void,
-    };
-}
-
 pub fn takeTokenPeeked(
     self: *Tokenizer,
     ch: u8,
@@ -659,11 +612,31 @@ pub inline fn takeToken(
     return self.takeTokenPeeked(ch);
 }
 
+pub fn takeTokenAssume(
+    self: *Tokenizer,
+    comptime token_type: types.Value,
+) ParseError!types.tokenValueType(token_type) {
+    switch (token_type) {
+        .number => {
+            return self.takeNumber(self.prevCharAssume());
+        },
+        .string => {
+            return self.takeStringInner();
+        },
+        .field => {
+            return self.takeFieldInner();
+        },
+        .bool => {
+            return self.takeBool(self.prevCharAssume());
+        },
+    }
+}
+
 pub fn takeTokenExpectPeeked(
     self: *Tokenizer,
     ch: u8,
-    comptime expected: TokenType,
-) !tokenValueType(expected) {
+    comptime expected: types.Value,
+) ParseError!types.tokenValueType(expected) {
     switch (expected) {
         .number => {
             return self.takeNumber(ch);
@@ -677,87 +650,23 @@ pub fn takeTokenExpectPeeked(
         .field => {
             return self.takeField(ch);
         },
-        .null => {
-            return self.consumeTrueAssume();
-        },
-        .object_begin => {
-            if (ch != keywords.OBJ_BEGIN) {
-                return ParseError.UnexpectedToken;
-            }
-        },
-        .object_end => {
-            if (ch != keywords.OBJ_END) {
-                return ParseError.UnexpectedToken;
-            }
-        },
-        .array_begin => {
-            if (ch != keywords.ARR_BEGIN) {
-                return ParseError.UnexpectedToken;
-            }
-        },
-        .array_end => {
-            if (ch != keywords.ARR_END) {
-                return ParseError.UnexpectedToken;
-            }
-        },
-        .comma => {
-            if (ch != keywords.COMMA) {
-                return ParseError.UnexpectedToken;
-            }
-        },
     }
 }
 
 pub inline fn takeTokenExpect(
     self: *Tokenizer,
-    comptime expected: TokenType,
-) ParseError!tokenValueType(expected) {
+    comptime expected: types.Default,
+) ParseError!types.tokenValueType(expected) {
     const ch = self.takeChar() orelse return ParseError.ExpectedToken;
 
     return self.takeTokenExpectPeeked(ch, expected);
 }
 
-pub const TokenTypeNullable = enum {
-    number,
-    string,
-    bool,
-    field,
-    object_begin,
-    object_end,
-    array_begin,
-    array_end,
-    colon,
-};
-
-pub const NullableToken = union(TokenTypeNullable) {
-    number: ?[]const u8,
-    string: ?[]const u8,
-    bool: ?bool,
-    field: []const u8,
-    object_begin: void,
-    object_end: void,
-    array_begin: void,
-    array_end: void,
-    colon: void,
-};
-
-pub fn tokenValueTypeNullable(
-    comptime token: TokenTypeNullable,
-) type {
-    return switch (token) {
-        .number => ?[]const u8,
-        .string => ?[]const u8,
-        .bool => ?bool,
-        .field => []const u8,
-        else => void,
-    };
-}
-
 pub fn takeTokenExpectNullablePeeked(
     self: *Tokenizer,
     ch: u8,
-    comptime expected: TokenTypeNullable,
-) ParseError!tokenValueTypeNullable(expected) {
+    comptime expected: types.Optional,
+) ParseError!types.tokenValueTypeNullable(expected) {
     switch (expected) {
         .number => {
             return self.takeNullableNumber(ch);
@@ -777,8 +686,8 @@ pub fn takeTokenExpectNullablePeeked(
 
 pub inline fn takeTokenExpectNullable(
     self: *Tokenizer,
-    comptime expected: TokenTypeNullable,
-) ParseError!tokenValueTypeNullable(expected) {
+    comptime expected: types.Optional,
+) ParseError!types.tokenValueTypeNullable(expected) {
     const ch = self.takeChar() orelse return ParseError.ExpectedToken;
 
     return self.takeTokenExpectNullablePeeked(ch, expected);
@@ -794,8 +703,8 @@ pub fn nextToken(
 
 pub fn nextTokenExpect(
     self: *Tokenizer,
-    comptime expected: TokenType,
-) ParseError!tokenValueType(expected) {
+    comptime expected: types.Default,
+) ParseError!types.tokenValueType(expected) {
     const ch = try self.consumeWhitespace() orelse return ParseError.ExpectedToken;
 
     return self.takeTokenExpectPeeked(ch, expected);
@@ -803,8 +712,8 @@ pub fn nextTokenExpect(
 
 pub fn nextTokenExpectNullable(
     self: *Tokenizer,
-    comptime expected: TokenTypeNullable,
-) ParseError!tokenValueTypeNullable(expected) {
+    comptime expected: types.Optional,
+) ParseError!types.tokenValueTypeNullable(expected) {
     const ch = try self.consumeWhitespace() orelse return ParseError.ExpectedToken;
 
     return self.takeTokenExpectNullable(ch, expected);
@@ -812,7 +721,7 @@ pub fn nextTokenExpectNullable(
 
 pub fn inferrTokenType(
     ch: u8,
-) ?TokenTypePrimitive {
+) ?types.Primitive {
     switch (ch) {
         // NOTE: Not sure if this makes sense
         inline else => |cmpt_ch| {
@@ -883,6 +792,27 @@ pub fn skipNullAssume(
     self.consumeChars(keywords.NULL.len - 1);
 }
 
+pub fn skipTokenAssume(
+    self: *Tokenizer,
+    comptime token_type: types.JsonPrimitive,
+) void {
+    switch (token_type) {
+        .number => {
+            self.skipNumberAssume();
+        },
+        .string => {
+            self.skipStringInner();
+        },
+        .true => {
+            self.skipTrueAssume();
+        },
+        .false => {
+            self.skipFalseAssume();
+        },
+        else => {},
+    }
+}
+
 pub fn skipTokenPeeked(
     self: *Tokenizer,
     ch: u8,
@@ -895,10 +825,10 @@ pub fn skipTokenPeeked(
             self.skipStringInner();
         },
         .true => {
-            self.consumeChars(keywords.TRUE.len - 1);
+            self.skipTrueAssume();
         },
         .false => {
-            self.consumeChars(keywords.FALSE.len - 1);
+            self.skipFalseAssume();
         },
         else => {},
     }
@@ -907,7 +837,7 @@ pub fn skipTokenPeeked(
 pub fn skipTokenExpectPeeked(
     self: *Tokenizer,
     ch: u8,
-    comptime expected: TokenType,
+    comptime expected: types.Default,
 ) ParseError!void {
     switch (inferrTokenType(ch) orelse return ParseError.InvalidToken) {
         .number => {
@@ -983,7 +913,7 @@ pub fn skipToken(
 
 pub fn skipTokenExpect(
     self: *Tokenizer,
-    comptime expected: TokenType,
+    comptime expected: types.Default,
 ) ParseError!void {
     const ch = self.takeChar() orelse return;
 
@@ -1000,7 +930,7 @@ pub fn skipNextToken(
 
 pub fn skipNextTokenExpect(
     self: *Tokenizer,
-    comptime expected: TokenType,
+    comptime expected: types.Default,
 ) ParseError!void {
     const ch = try self.consumeWhitespace() orelse return ParseError.ExpectedToken;
 
