@@ -1,6 +1,7 @@
 const std = @import("std");
 
-const meta = @import("../meta.zig");
+const common = @import("parzer-common");
+
 const types = @import("../token-types.zig");
 const src = @import("../token-source.zig");
 
@@ -18,7 +19,7 @@ pub inline fn deserializeInner(
     dest: *T,
     source: *Tokenizer,
 ) DeserializeError!void {
-    meta.expectEnum(T);
+    common.meta.expectEnum(T);
 
     const tag = try source.takeStringInner();
 
@@ -31,7 +32,7 @@ pub fn deserialize(
     source: *Tokenizer,
     comptime opts: DeserializeOpts,
 ) DeserializeError!void {
-    meta.expectEnum(T);
+    common.meta.expectEnum(T);
 
     switch (try src.peekNextTokenTypeDiscard(source, opts)) {
         .string => {
@@ -49,7 +50,7 @@ pub fn deserializeRecheck(
     source: *Tokenizer,
     comptime id_token_type: types.Primitive,
 ) DeserializeError!void {
-    meta.expectEnum(T);
+    common.meta.expectEnum(T);
 
     switch (id_token_type) {
         .string => {
@@ -67,7 +68,7 @@ pub fn deserializeNullable(
     source: *Tokenizer,
     comptime opts: DeserializeOpts,
 ) DeserializeError!void {
-    meta.expectEnum(T);
+    common.meta.expectEnum(T);
 
     switch (try src.peekNextTokenTypeDiscard(source, opts)) {
         .string => {
@@ -88,7 +89,7 @@ pub fn deserializeNullableRecheck(
     source: *Tokenizer,
     comptime id_token_type: types.Primitive,
 ) DeserializeError!void {
-    meta.expectEnum(T);
+    common.meta.expectEnum(T);
 
     switch (id_token_type) {
         .string => {

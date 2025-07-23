@@ -1,15 +1,13 @@
 const std = @import("std");
 
-const meta = @import("../meta.zig");
+const common = @import("parzer-common");
 const src = @import("../token-source.zig");
 
-const Tokenizer = @import("../tokenizer.zig");
-
+const Tokenizer = @import("../tokenizer.zig").Tokenizer;
 const DeserializeError = @import("../errors.zig").DeserializeError;
 const DeserializeOpts = @import("../opts.zig").DeserializeOpts;
 
 const obj = @import("object.zig");
-
 const @"union" = @This();
 
 const deserializeChild = @import("deserialize.zig").deserializeChild;
@@ -18,7 +16,7 @@ pub fn unionTags(
     comptime T: type,
 ) type {
     comptime {
-        meta.expectUnion(T);
+        common.meta.expectUnion(T);
 
         const union_fields = @typeInfo(T).@"union".fields;
 
@@ -46,7 +44,7 @@ pub fn unionValueTags(
     comptime T: type,
 ) type {
     comptime {
-        meta.expectUnion(T);
+        common.meta.expectUnion(T);
 
         const union_fields = @typeInfo(T).@"union".fields;
 
@@ -79,7 +77,7 @@ pub fn unionVoidTags(
     comptime T: type,
 ) type {
     comptime {
-        meta.expectUnion(T);
+        common.meta.expectUnion(T);
 
         const union_fields = @typeInfo(T).@"union".fields;
 
@@ -120,7 +118,7 @@ pub const internal = struct {
         source: *Tokenizer,
         comptime opts: DeserializeOpts,
     ) DeserializeError!unionTags(T) {
-        meta.expectUnion(T);
+        common.meta.expectUnion(T);
 
         const TagType = unionTags(T);
 
@@ -195,7 +193,7 @@ pub const internal = struct {
         source: *Tokenizer,
         comptime opts: DeserializeOpts,
     ) DeserializeError!void {
-        meta.expectUnion(T);
+        common.meta.expectUnion(T);
 
         // get active union field
         const tag = try searchTag(T, source, opts);
@@ -208,7 +206,7 @@ pub const internal = struct {
         // as calling it the latter could create confusion between the struct
         // fields and the union fields.
         const Child = @FieldType(T, tag_name);
-        meta.expectStruct(Child);
+        common.meta.expectStruct(Child);
 
         // activate union field
         dest.* = @unionInit(T, tag_name, undefined);
@@ -289,7 +287,7 @@ pub const internal = struct {
         source: *Tokenizer,
         comptime opts: DeserializeOpts,
     ) DeserializeError!void {
-        meta.expectUnion(T);
+        common.meta.expectUnion(T);
 
         const ValueTagsEnum = unionValueTags(T);
 
@@ -357,7 +355,7 @@ fn deserializeValueInner(
     source: *Tokenizer,
     comptime opts: DeserializeOpts,
 ) DeserializeError!void {
-    meta.expectUnion(T);
+    common.meta.expectUnion(T);
 
     const ValueTagsEnum = unionValueTags(T);
 
@@ -365,7 +363,7 @@ fn deserializeValueInner(
         return DeserializeError.UnknownTag;
     }
 
-    switch (opts.union_opts.representation) {
+    switch (opts.union_opts) {
         .externally_tagged => {
             const tag: ValueTagsEnum = switch (try src.peekNextTokenTypeDiscard(source, opts)) {
                 .string => std.meta.stringToEnum(
@@ -398,8 +396,8 @@ fn deserializeValueInner(
 
             return src.nextTokenExpect(source, .object_end, opts);
         },
-        .internally_tagged => {
-            if (opts.union_opts.assume_internal_tag_is_first) {
+        .internally_tagged => |union_opts| {
+            if (union_opts.flexible_tag_location) {
                 return @"union".internal.deserializeInner(T, dest, source, opts);
             } else {
                 return @"union".internal.deserializeInnerFlex(T, dest, source, opts);
@@ -415,7 +413,7 @@ fn deserializeEnumValueInner(
     dest: *T,
     source: *Tokenizer,
 ) DeserializeError!void {
-    meta.expectUnion(T);
+    common.meta.expectUnion(T);
 
     const VoidTagsEnum = unionVoidTags(T);
 

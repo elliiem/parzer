@@ -30,6 +30,17 @@ const ModuleOpts = struct {
     optimize: ?std.builtin.OptimizeMode = null,
 };
 
+fn moduleParzerCommon(
+    b: *Build,
+    opts: ModuleOpts,
+) *Build.Module {
+    return b.addModule("parzer-common", .{
+        .root_source_file = b.path(opts.root_path),
+        .target = opts.target orelse b.standardTargetOptions(.{}),
+        .optimize = opts.optimize orelse b.standardOptimizeOption(.{}),
+    });
+}
+
 fn moduleParzer(
     b: *Build,
     opts: ModuleOpts,
@@ -47,11 +58,19 @@ pub fn build(
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const parzer_common = moduleParzerCommon(b, .{
+        .root_path = "src/parzer-common/parzer-common.zig",
+        .target = target,
+        .optimize = optimize,
+    });
+
     const parzer = moduleParzer(b, .{
         .root_path = "src/parzer.zig",
         .target = target,
         .optimize = optimize,
     });
+
+    parzer.addImport("parzer-common", parzer_common);
 
     _ = stepTest(b, parzer);
 }

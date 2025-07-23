@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const meta = @import("../meta.zig");
+const common = @import("parzer-common");
 const types = @import("../token-types.zig");
 const src = @import("../token-source.zig");
 
@@ -62,7 +62,7 @@ pub fn deserializeFieldValue(
     name: []const u8,
     comptime opts: DeserializeOpts,
 ) DeserializeError!void {
-    meta.expectStruct(T);
+    common.meta.expectStruct(T);
 
     const info = @typeInfo(T).@"struct";
 
@@ -91,7 +91,7 @@ pub fn visitFields(
     dest: *T,
     seen: []bool,
 ) DeserializeError!void {
-    meta.expectStruct(T);
+    common.meta.expectStruct(T);
 
     const fields = @typeInfo(T).@"struct".fields;
 
@@ -116,7 +116,7 @@ pub fn deserializeTrailingFields(
     seen: []bool,
     comptime opts: DeserializeOpts,
 ) DeserializeError!void {
-    meta.expectStruct(T);
+    common.meta.expectStruct(T);
 
     while (try getFieldName(source, opts)) |field_name| {
         try deserializeFieldValue(
@@ -146,7 +146,7 @@ pub fn deserializeInner(
     source: *Tokenizer,
     comptime opts: DeserializeOpts,
 ) DeserializeError!void {
-    meta.expectStruct(T);
+    common.meta.expectStruct(T);
 
     const info = @typeInfo(T).@"struct";
 
@@ -181,7 +181,7 @@ pub fn deserializeRecheck(
     comptime token_type: types.Primitive,
     comptime opts: DeserializeOpts,
 ) DeserializeError!void {
-    meta.expectStruct(T);
+    common.meta.expectStruct(T);
 
     switch (token_type) {
         .object_begin => {
@@ -199,7 +199,7 @@ pub fn deserialize(
     source: *Tokenizer,
     comptime opts: DeserializeOpts,
 ) DeserializeError!void {
-    meta.expectStruct(T);
+    common.meta.expectStruct(T);
 
     if (opts.precice_errors) {
         switch (try src.peekNextTokenTypeDiscard(source, opts)) {
@@ -222,7 +222,7 @@ pub fn deserializeNullableRecheck(
     comptime token_type: types.Primitive,
     comptime opts: DeserializeOpts,
 ) DeserializeError!void {
-    meta.expectStruct(T);
+    common.meta.expectStruct(T);
 
     switch (token_type) {
         .object_begin => {
@@ -243,7 +243,7 @@ pub fn deserializeNullable(
     source: *Tokenizer,
     comptime opts: DeserializeOpts,
 ) DeserializeError!void {
-    meta.expectStruct(T);
+    common.meta.expectStruct(T);
 
     switch (try src.peekNextTokenTypeDiscard(source, opts)) {
         .object_begin => {

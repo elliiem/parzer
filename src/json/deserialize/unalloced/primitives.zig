@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const meta = @import("../meta.zig");
+const common = @import("parzer-common");
 const types = @import("../token-types.zig");
 const src = @import("../token-source.zig");
 
@@ -127,7 +127,7 @@ pub const int = struct {
         source: *Tokenizer,
         peek: u8,
     ) DeserializeError!void {
-        meta.expectInt(T);
+        common.meta.expectInt(T);
 
         const number = try source.takeTokenExpectPeeked(peek, .number);
 
@@ -141,7 +141,7 @@ pub const int = struct {
         peeked: u8,
         comptime token_type: types.Primitive,
     ) DeserializeError!void {
-        meta.expectInt(T);
+        common.meta.expectInt(T);
 
         switch (token_type) {
             .number => {
@@ -159,7 +159,7 @@ pub const int = struct {
         source: *Tokenizer,
         comptime opts: DeserializeOpts,
     ) DeserializeError!void {
-        meta.expectInt(T);
+        common.meta.expectInt(T);
 
         if (opts.precice_errors) {
             const peek = try src.peekNextTokenType(source, opts);
@@ -189,7 +189,7 @@ pub const int = struct {
         peek: u8,
         comptime token_type: types.Primitive,
     ) DeserializeError!void {
-        meta.expectInt(T);
+        common.meta.expectInt(T);
 
         switch (token_type) {
             .number => {
@@ -210,7 +210,7 @@ pub const int = struct {
         source: *Tokenizer,
         comptime opts: DeserializeOpts,
     ) DeserializeError!void {
-        meta.expectInt(T);
+        common.meta.expectInt(T);
 
         const peek = try src.peekNextTokenType(source, opts);
 
@@ -235,7 +235,7 @@ pub const float = struct {
         source: *Tokenizer,
         peek: u8,
     ) DeserializeError!void {
-        meta.expectFloat(T);
+        common.meta.expectFloat(T);
 
         const number = try source.takeTokenExpectPeeked(peek, .number);
 
@@ -249,7 +249,7 @@ pub const float = struct {
         peek: u8,
         comptime token_type: types.Primitive,
     ) DeserializeError!void {
-        meta.expectFloat(T);
+        common.meta.expectFloat(T);
 
         switch (token_type) {
             .number => {
@@ -267,7 +267,7 @@ pub const float = struct {
         source: *Tokenizer,
         comptime opts: DeserializeOpts,
     ) DeserializeError!void {
-        meta.expectFloat(T);
+        common.meta.expectFloat(T);
 
         if (opts.precice_errors) {
             const peek = try src.peekNextTokenType(source, opts);
@@ -297,7 +297,7 @@ pub const float = struct {
         peek: u8,
         comptime token_type: types.Primitive,
     ) DeserializeError!void {
-        meta.expectFloat(T);
+        common.meta.expectFloat(T);
 
         switch (token_type) {
             .number => {
@@ -318,7 +318,7 @@ pub const float = struct {
         source: *Tokenizer,
         comptime opts: DeserializeOpts,
     ) DeserializeError!void {
-        meta.expectFloat(T);
+        common.meta.expectFloat(T);
 
         const peek = try src.peekNextTokenType(source, opts);
 
@@ -359,7 +359,7 @@ pub const string = struct {
         }
     }
 
-    pub fn deserializeString(
+    pub fn deserialize(
         dest: *[]const u8,
         source: *Tokenizer,
         comptime opts: DeserializeOpts,
@@ -396,7 +396,7 @@ pub const string = struct {
         }
     }
 
-    pub fn deserializeOptional(
+    pub fn deserializeNullable(
         dest: *?[]const u8,
         source: *Tokenizer,
         comptime opts: DeserializeOpts,

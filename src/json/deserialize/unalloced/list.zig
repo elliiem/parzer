@@ -1,6 +1,7 @@
 const std = @import("std");
 
-const meta = @import("../meta.zig");
+const common = @import("parzer-common");
+
 const types = @import("../token-types.zig");
 const src = @import("../token-source.zig");
 
@@ -40,7 +41,7 @@ pub fn deserializeItem(
     source: *Tokenizer,
     comptime opts: DeserializeOpts,
 ) DeserializeError!void {
-    meta.expectArray(T);
+    common.meta.expectArray(T);
 
     const Child = std.meta.Child(T);
 
@@ -49,7 +50,7 @@ pub fn deserializeItem(
 
         switch (peek.token_type) {
             .comma => {
-                if (meta.arrayLenght(T) == 1) {
+                if (common.meta.arrayLenght(T) == 1) {
                     return DeserializeError.UnexpectedToken;
                 }
 
@@ -105,9 +106,9 @@ pub const array = struct {
         source: *Tokenizer,
         comptime opts: DeserializeOpts,
     ) DeserializeError!void {
-        meta.expectArray(T);
+        common.meta.expectArray(T);
 
-        if (meta.arrayLenght(T) > 0) {
+        if (common.meta.arrayLenght(T) > 0) {
             @compileError("Expected array with lenght 0!");
         }
 
@@ -122,7 +123,7 @@ pub const array = struct {
                         return DeserializeError.ArrayTooLong;
                     }
 
-                    return meta.expectedError(std.meta.Child(T));
+                    return common.meta.expectedError(std.meta.Child(T));
                 },
             }
         } else {
@@ -136,9 +137,9 @@ pub const array = struct {
         comptime id_token_type: types.Primitive,
         comptime opts: DeserializeOpts,
     ) DeserializeError!void {
-        meta.expectArray(T);
+        common.meta.expectArray(T);
 
-        if (meta.arrayLenght(T) > 0) {
+        if (common.meta.arrayLenght(T) > 0) {
             @compileError("Expected array with lenght 0!");
         }
 
@@ -157,9 +158,9 @@ pub const array = struct {
         source: *Tokenizer,
         comptime opts: DeserializeOpts,
     ) DeserializeError!void {
-        meta.expectArray(T);
+        common.meta.expectArray(T);
 
-        if (meta.arrayLenght(T) > 0) {
+        if (common.meta.arrayLenght(T) > 0) {
             @compileError("Expected array with lenght 0!");
         }
 
@@ -184,9 +185,9 @@ pub const array = struct {
         comptime id_token_type: types.Primitive,
         comptime opts: DeserializeOpts,
     ) DeserializeError!void {
-        meta.expectArray(T);
+        common.meta.expectArray(T);
 
-        if (meta.arrayLenght(T) > 0) {
+        if (common.meta.arrayLenght(T) > 0) {
             @compileError("Expected array with lenght 0!");
         }
 
@@ -209,9 +210,9 @@ pub const array = struct {
         source: *Tokenizer,
         comptime opts: DeserializeOpts,
     ) DeserializeError!void {
-        meta.expectArray(T);
+        common.meta.expectArray(T);
 
-        if (meta.arrayLenght(T) > 0) {
+        if (common.meta.arrayLenght(T) > 0) {
             @compileError("Expected array with lenght 0!");
         }
 
@@ -234,20 +235,20 @@ pub const array = struct {
         source: *Tokenizer,
         comptime opts: DeserializeOpts,
     ) DeserializeError!void {
-        meta.expectArray(T);
+        common.meta.expectArray(T);
 
-        if (meta.arrayLenght(T) == 0) {
+        if (common.meta.arrayLenght(T) == 0) {
             return consumeEmptyInner(T, source, opts);
         }
 
         {
-            for (0..meta.arrayLenght(T) - 1) |i| {
+            for (0..common.meta.arrayLenght(T) - 1) |i| {
                 try deserializeItem(T, &dest.*[i], source, opts);
 
                 try list.consumeSeperator(source, opts);
             }
 
-            try deserializeItem(T, &dest.*[meta.arrayLenght(T) - 1], source, opts);
+            try deserializeItem(T, &dest.*[common.meta.arrayLenght(T) - 1], source, opts);
         }
 
         try array.consumeTerminator(source, opts);
@@ -260,9 +261,9 @@ pub const array = struct {
         comptime id_token_type: types.Primitive,
         comptime opts: DeserializeOpts,
     ) DeserializeError!void {
-        meta.expectArray(T);
+        common.meta.expectArray(T);
 
-        if (meta.arrayLenght(T) == 0) {
+        if (common.meta.arrayLenght(T) == 0) {
             return consumeEmpty(T, source, opts);
         }
 
@@ -282,9 +283,9 @@ pub const array = struct {
         source: *Tokenizer,
         comptime opts: DeserializeOpts,
     ) DeserializeError!void {
-        meta.expectArray(T);
+        common.meta.expectArray(T);
 
-        if (meta.arrayLenght(T) == 0) {
+        if (common.meta.arrayLenght(T) == 0) {
             return array.consumeEmpty(T, source, opts);
         }
 
@@ -309,9 +310,9 @@ pub const array = struct {
         comptime id_token_type: types.Primitive,
         comptime opts: DeserializeOpts,
     ) DeserializeError!void {
-        meta.expectArray(T);
+        common.meta.expectArray(T);
 
-        if (meta.arrayLenght(T) == 0) {
+        if (common.meta.arrayLenght(T) == 0) {
             return array.deserializeEmptyNullableRecheck(T, dest, source, id_token_type, opts);
         }
 
@@ -334,9 +335,9 @@ pub const array = struct {
         source: *Tokenizer,
         comptime opts: DeserializeOpts,
     ) DeserializeError!void {
-        meta.expectArray(T);
+        common.meta.expectArray(T);
 
-        if (meta.arrayLenght(T) == 0) {
+        if (common.meta.arrayLenght(T) == 0) {
             return array.deserializeEmptyNullable(T, dest, source, opts);
         }
 

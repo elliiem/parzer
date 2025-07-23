@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const meta = @import("../meta.zig");
+const common = @import("parzer-common");
 const types = @import("../token-types.zig");
 const src = @import("../token-source.zig");
 
@@ -17,7 +17,7 @@ pub fn deserializePointerRecheck(
     source: *Tokenizer,
     comptime id_token_type: types.Primitve,
 ) DeserializeError!void {
-    meta.expectPointer(T);
+    common.meta.expectPointer(T);
 
     const info = @typeInfo(T).pointer;
 
@@ -41,7 +41,7 @@ pub fn deserializePointer(
     source: *Tokenizer,
     comptime opts: DeserializeOpts,
 ) DeserializeError!void {
-    meta.expectPointer(T);
+    common.meta.expectPointer(T);
 
     const info = @typeInfo(T).pointer;
 
@@ -65,7 +65,7 @@ pub fn deserializePointerNullableRecheck(
     source: *Tokenizer,
     comptime id_token_type: types.Primitve,
 ) DeserializeError!void {
-    meta.expectPointer(T);
+    common.meta.expectPointer(T);
 
     const info = @typeInfo(T).pointer;
 
@@ -89,7 +89,7 @@ pub fn deserializePointerNullable(
     source: *Tokenizer,
     comptime opts: DeserializeOpts,
 ) DeserializeError!void {
-    meta.expectPointer(T);
+    common.meta.expectPointer(T);
 
     const info = @typeInfo(T).pointer;
 
@@ -113,7 +113,7 @@ fn deserializeOptional(
     source: *Tokenizer,
     comptime opts: DeserializeOpts,
 ) DeserializeError!void {
-    meta.expectOptional(T);
+    common.meta.expectOptional(T);
 
     const Child = std.meta.Child(T);
 
@@ -159,7 +159,7 @@ fn deserializeOptionalRecheck(
     comptime token_type: types.Primitve,
     comptime opts: DeserializeOpts,
 ) DeserializeError!void {
-    meta.expectOptional(T);
+    common.meta.expectOptional(T);
 
     const Child = std.meta.Child(T);
 
@@ -202,7 +202,7 @@ pub fn deserializeChildRecheck(
     comptime token_type: types.Primitve,
     comptime opts: DeserializeOpts,
 ) DeserializeError!void {
-    meta.expectPointer(@TypeOf(dest));
+    common.meta.expectPointer(@TypeOf(dest));
 
     switch (@typeInfo(T)) {
         .bool => {
@@ -280,7 +280,7 @@ pub fn deserialzeFromSource(
     source: *Tokenizer,
     comptime opts: DeserializeOpts,
 ) DeserializeError!T {
-    var dest = meta.createUndefined(T);
+    var dest = common.meta.createUndefined(T);
 
     try deserializeChild(T, &dest, source, opts);
 
